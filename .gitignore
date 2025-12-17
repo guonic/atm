@@ -1,0 +1,107 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+vendor/
+*.mod.sum
+
+# C++
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+*.cmake
+!CMakeLists.txt
+.vscode/
+.idea/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build outputs
+build/
+dist/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+storage/database/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Test
+coverage/
+*.cover
+*.prof
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Generated files
+**/generated/
+**/*_pb2.py
+**/*_pb2_grpc.py
+**/*.pb.go
+**/*_pb2.pyi
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local Storage
+storage/database/data
+storage/database/*.sql
+

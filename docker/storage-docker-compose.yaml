@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: timescaledb-quant
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=quant          # 量化专用用户
+      - POSTGRES_PASSWORD=quant123   # 密码
+      - POSTGRES_DB=quant_db         # 量化数据库
+      - PGDATA=/var/lib/postgresql/data/pgdata  # 数据目录
+      # 量化场景内存优化（根据Mac内存调整，16G内存设4GB）
+      - POSTGRES_SHARED_BUFFERS=2GB
+      - POSTGRES_WORK_MEM=64MB
+    volumes:
+      # 数据持久化：项目 storage/database/data 目录 → 容器数据目录
+      - ../storage/database/data:/var/lib/postgresql/data
+      # 自定义PostgreSQL配置：挂载到容器内的配置目录
+      - ../storage/database/postgresql.conf:/etc/postgresql/postgresql.conf
+      # 初始化SQL脚本：仅在数据库首次初始化时执行（/docker-entrypoint-initdb.d/ 目录）
+      - ../storage/database/quant_init.sql:/docker-entrypoint-initdb.d/quant_init.sql
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    restart: always  # 容器异常退出自动重启
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535  # 提升文件句柄数，适配量化高频读写
+

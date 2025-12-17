@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 设置运行环境
+      run: |
+        echo "在这里添加你的构建和测试步骤"
+        # 例如: npm install, npm test 等
+    
+    - name: 运行测试
+      run: |
+        echo "添加测试命令"
+
