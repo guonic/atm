@@ -1,0 +1,366 @@
+# ATM 项目代码约束规则
+
+## 项目概述
+这是一个量化交易系统（ATM - Automated Trading Machine），采用 Python、Golang、C++ 混合开发架构。
+
+## 项目结构
+
+### 目录组织
+- `python/` - Python 代码，用于快速开发、数据分析、策略研究、API 服务
+- `go/` - Golang 代码，用于高性能服务、并发处理、微服务
+- `cpp/` - C++ 代码，用于超高性能计算、核心算法、底层优化
+- `pkg/` - 共享包，包含 Protocol Buffers 定义、API 接口定义等跨语言接口
+- `config/` - 配置文件目录
+- `scripts/` - 脚本工具目录
+- `docker/` - Docker 配置文件
+- `storage/` - 数据存储目录
+- `trading/` - 交易业务逻辑
+- `docs/` - 文档目录
+- `tools/` - 开发工具
+- `build/` - 构建输出（gitignore）
+- `dist/` - 发布包（gitignore）
+
+## Python 代码规范
+
+### 目录结构
+- `python/atm/` - 主包目录
+  - `config/` - 配置管理
+  - `data/` - 数据处理（collector, processor, storage）
+  - `trading/` - 交易模块（strategy, execution, risk）
+  - `analysis/` - 分析模块（indicators, backtest）
+  - `api/` - API 服务（rest, grpc）
+  - `utils/` - 工具函数
+
+### 编码规范
+- 使用 Python 3.9+ 语法
+- 遵循 PEP 8 代码风格
+- 使用类型提示（Type Hints）
+- 模块使用 `__init__.py`
+- 包名使用小写字母和下划线：`atm`, `data_collector`
+- 类名使用驼峰命名：`DataCollector`, `TradingStrategy`
+- 函数和变量使用小写下划线：`collect_data()`, `trading_config`
+- 常量使用全大写下划线：`MAX_POSITION_SIZE`, `DEFAULT_TIMEOUT`
+- 采用英文注释、文档
+
+### 文件命名
+- 模块文件：`snake_case.py`
+- 测试文件：`test_*.py`
+- 配置文件：`config.py`, `settings.py`
+
+### 导入规范
+```python
+# 标准库
+import os
+import sys
+from typing import List, Dict, Optional
+
+# 第三方库
+import numpy as np
+import pandas as pd
+
+# 本地模块
+from atm.config import loader
+from atm.data.collector import DataCollector
+```
+
+### 文档字符串
+- 所有公共函数、类、模块必须有 docstring
+- 使用 Google 风格或 NumPy 风格的 docstring
+
+## Golang 代码规范
+
+### 目录结构
+- `go/cmd/` - 可执行程序入口（trader, collector, api）
+- `go/internal/` - 内部包（不对外暴露）
+- `go/pkg/` - 公共包（可被外部引用）
+- `go/api/` - API 定义和生成代码
+
+### 编码规范
+- 使用 Go 1.21+ 特性
+- 遵循 Go 官方代码规范（gofmt）
+- 包名使用小写字母，简短有意义：`config`, `trading`, `data`
+- 公开函数和类型使用驼峰命名：`CollectData()`, `TradingStrategy`
+- 私有函数和变量使用小写驼峰：`collectData()`, `tradingConfig`
+- 常量使用驼峰命名：`MaxPositionSize`, `DefaultTimeout`
+- 采用英文注释、文档
+
+### 文件命名
+- 源文件：`snake_case.go` 或 `camelCase.go`（与包名一致）
+- 测试文件：`*_test.go`
+- 示例文件：`example_*.go`
+
+### 包组织
+- 每个目录一个包
+- 包名与目录名一致
+- 避免循环依赖
+- `internal/` 下的包只能被同一模块内的包导入
+
+### 错误处理
+- 始终检查错误返回值
+- 使用 `fmt.Errorf()` 包装错误并添加上下文
+- 避免使用 `panic`，除非是程序启动时的致命错误
+
+## C++ 代码规范
+
+### 目录结构
+- `cpp/include/atm/` - 头文件（core, data, trading, analysis）
+- `cpp/src/` - 源文件
+- `cpp/bindings/` - 语言绑定（python, go）
+- `cpp/third_party/` - 第三方库
+
+### 编码规范
+- 使用 C++17 标准
+- 遵循 Google C++ Style Guide 或 LLVM Style Guide
+- 命名空间：`namespace atm { namespace core { } }`
+- 类名使用驼峰命名：`DataCollector`, `TradingStrategy`
+- 函数和变量使用驼峰命名：`collectData()`, `tradingConfig`
+- 常量使用全大写下划线：`MAX_POSITION_SIZE`, `DEFAULT_TIMEOUT`
+- 私有成员使用下划线前缀：`private_data_`, `internal_state_`
+- 采用英文注释、文档
+
+### 文件命名
+- 头文件：`snake_case.hpp` 或 `CamelCase.hpp`
+- 源文件：`snake_case.cpp`
+- 测试文件：`*_test.cpp`
+
+### 头文件保护
+```cpp
+#pragma once
+
+// 或
+#ifndef ATM_CORE_TYPES_HPP
+#define ATM_CORE_TYPES_HPP
+// ...
+#endif
+```
+
+### 内存管理
+- 优先使用智能指针：`std::unique_ptr`, `std::shared_ptr`
+- 避免裸指针，除非必要
+- 使用 RAII 原则
+
+## 跨语言交互规范
+
+### Protocol Buffers
+- 所有跨语言接口定义在 `pkg/proto/` 目录
+- 使用 `.proto` 文件定义消息和服务
+- 命名使用 `snake_case`：`trading_order.proto`, `data_message.proto`
+- 消息名使用驼峰：`TradingOrder`, `DataMessage`
+- 字段名使用 `snake_case`：`order_id`, `trade_time`
+
+### REST API
+- API 定义在 `pkg/api/rest/` 目录
+- 使用 OpenAPI/Swagger 规范
+- 路径使用小写和连字符：`/api/v1/trading/orders`
+- 使用 RESTful 设计原则
+
+### gRPC 服务
+- 服务定义在 `pkg/proto/` 的 `.proto` 文件中
+- 服务名使用驼峰：`TradingService`, `DataService`
+- 方法名使用驼峰：`PlaceOrder()`, `GetMarketData()`
+
+### 共享库
+- C++ 编译为共享库（.so/.dylib/.dll）
+- Python 通过 pybind11 绑定调用
+- Go 通过 cgo 调用
+- 接口定义在 `cpp/include/atm/` 目录
+
+## 配置文件规范
+
+### 配置文件位置
+- 主配置：`config/config.yaml`
+- 环境特定：`config/config.dev.yaml`, `config/config.prod.yaml`
+- 环境变量：`.env`（不提交到 Git）
+
+### 配置格式
+- 使用 YAML 格式
+- 使用小写下划线：`db_host`, `api_port`
+- 嵌套结构使用缩进表示层级
+
+## 测试规范
+
+### Python 测试
+- 测试文件放在 `python/tests/` 目录
+- 使用 pytest 框架
+- 测试函数命名：`test_*`
+- 使用 fixtures 管理测试数据
+
+### Go 测试
+- 测试文件：`*_test.go`
+- 测试函数命名：`Test*`
+- 使用 `testing` 包
+- 表驱动测试优先
+
+### C++ 测试
+- 使用 Google Test 框架
+- 测试文件：`*_test.cpp`
+- 测试函数命名：`TEST(SuiteName, TestName)`
+- 放在 `cpp/tests/` 目录
+
+## 文档规范
+
+### 代码注释
+- Python: 使用 docstring
+- Go: 使用注释，公开函数必须有注释
+- C++: 使用 Doxygen 风格注释
+
+### 文档文件
+- 架构文档：`docs/ARCHITECTURE.md`
+- API 文档：`docs/API.md`
+- 开发指南：`docs/DEVELOPMENT.md`
+- 项目结构：`docs/PROJECT_STRUCTURE.md`
+
+## 构建和部署
+
+### 构建命令
+- 使用 `make build` 构建所有语言
+- 使用 `make build-python` 构建 Python
+- 使用 `make build-go` 构建 Go
+- 使用 `make build-cpp` 构建 C++
+
+### 依赖管理
+- Python: `requirements.txt` 和 `pyproject.toml`
+- Go: `go.mod` 和 `go.sum`
+- C++: `CMakeLists.txt` 和 `conanfile.txt`（可选）
+
+## 代码生成
+
+### Protocol Buffers
+- 使用 `make proto` 生成代码
+- 生成的代码不提交到 Git
+- 只提交 `.proto` 源文件
+
+### API 代码
+- REST API 使用 OpenAPI 生成客户端代码
+- gRPC 使用 protoc 生成代码
+
+## 版本控制
+
+### Git 提交规范
+详细规范请参考 [docs/COMMIT_CONVENTION.md](docs/COMMIT_CONVENTION.md)
+
+**基本格式**：
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**提交类型**：
+- `feat`: 新功能
+- `fix`: 修复 Bug
+- `docs`: 文档变更
+- `style`: 代码格式变更
+- `refactor`: 代码重构
+- `perf`: 性能优化
+- `test`: 测试相关
+- `build`: 构建系统变更
+- `ci`: CI/CD 配置变更
+- `chore`: 其他变更
+- `revert`: 回滚提交
+
+**影响范围 (scope)**：
+- 按语言：`python`, `go`, `cpp`
+- 按模块：`trading`, `data`, `api`, `config`, `storage`, `analysis`
+- 按功能：`strategy`, `execution`, `risk`, `collector`, `processor`
+
+**示例**：
+```
+feat(trading): add order execution engine
+fix(data): correct timestamp parsing error
+docs: update API documentation
+refactor(go): simplify error handling
+```
+
+### 分支策略
+详细规范请参考 [docs/BRANCH_NAMING.md](docs/BRANCH_NAMING.md)
+
+**主要分支**:
+- `main` / `master` - 主分支，稳定版本（受保护，严格检查）
+- `develop` - 开发分支
+
+**功能分支**:
+- `feature/<name>` - 新功能（从 develop 创建）
+- `fix/<name>` - Bug 修复（从 develop 创建）
+- `hotfix/<name>` - 紧急修复（从 main 创建）
+- `release/<version>` - 发布准备（从 develop 创建）
+- `chore/<name>` - 杂项任务
+- `docs/<name>` - 文档相关
+- `test/<name>` - 测试相关
+
+**命名规则**:
+- 使用小写字母和连字符
+- 简短且描述性
+- 避免特殊字符
+- 使用英文
+
+**检查策略**:
+- 开发分支（feature/*, fix/* 等）可以自由提交
+- main 分支的合并提交必须符合提交规范
+- 推送时检查分支命名是否符合规范
+
+## 性能考虑
+
+### 语言选择原则
+- **高频操作**：使用 C++
+- **并发处理**：使用 Go
+- **快速迭代**：使用 Python
+- **数据分析**：使用 Python（pandas, numpy）
+- **实时服务**：使用 Go
+- **算法优化**：使用 C++
+
+## 安全规范
+
+### 敏感信息
+- 密码、密钥等敏感信息不提交到代码库
+- 使用环境变量或密钥管理服务
+- 配置文件示例使用 `.example` 后缀
+
+### 输入验证
+- 所有外部输入必须验证
+- 使用参数化查询防止 SQL 注入
+- API 输入使用 schema 验证
+
+## 错误处理
+
+### 错误日志
+- 使用结构化日志
+- 包含足够的上下文信息
+- 敏感信息不记录到日志
+
+### 错误传播
+- Python: 使用异常
+- Go: 使用 error 返回值
+- C++: 使用异常或错误码
+
+## 代码审查
+
+### 审查要点
+- 代码风格一致性
+- 性能考虑
+- 安全性
+- 测试覆盖率
+- 文档完整性
+
+## 注意事项
+
+1. **不要**在代码中硬编码配置值
+2. **不要**提交生成的代码（proto, API 客户端等）
+3. **不要**在公共 API 中暴露内部实现细节
+4. **确保**所有公共接口都有文档
+5. **确保**跨语言接口定义在 `pkg/` 目录
+6. **确保**测试覆盖核心功能
+7. **确保**代码符合各语言的编码规范
+
+## AI 助手提示
+
+当生成或修改代码时：
+- 遵循上述目录结构和命名规范
+- 确保代码符合各语言的编码规范
+- 跨语言接口必须定义在 `pkg/` 目录
+- 添加适当的注释和文档
+- 考虑性能和安全性
+- 保持代码风格一致性
+

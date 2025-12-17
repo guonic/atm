@@ -1,0 +1,53 @@
+{
+  "extends": ["@commitlint/config-conventional"],
+  "rules": {
+    "type-enum": [
+      2,
+      "always",
+      [
+        "feat",
+        "fix",
+        "docs",
+        "style",
+        "refactor",
+        "perf",
+        "test",
+        "build",
+        "ci",
+        "chore",
+        "revert"
+      ]
+    ],
+    "scope-enum": [
+      2,
+      "always",
+      [
+        "python",
+        "go",
+        "cpp",
+        "trading",
+        "data",
+        "api",
+        "config",
+        "storage",
+        "analysis",
+        "strategy",
+        "execution",
+        "risk",
+        "collector",
+        "processor",
+        "docker",
+        "scripts",
+        "docs",
+        "proto"
+      ]
+    ],
+    "scope-case": [2, "always", "lower-case"],
+    "subject-case": [2, "never", ["upper-case", "pascal-case", "start-case"]],
+    "subject-empty": [2, "never"],
+    "subject-full-stop": [2, "never", "."],
+    "type-case": [2, "always", "lower-case"],
+    "type-empty": [2, "never"]
+  }
+}
+

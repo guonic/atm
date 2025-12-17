@@ -40,6 +40,7 @@ help:
 	@echo "  $(YELLOW)make storage-status$(NC) - 查看数据库状态"
 	@echo "  $(YELLOW)make format$(NC)         - 格式化代码"
 	@echo "  $(YELLOW)make lint$(NC)           - 代码检查"
+	@echo "  $(YELLOW)make install-hooks$(NC)  - 安装 Git hooks"
 
 ## build: 构建所有语言
 build: proto build-python build-go build-cpp
@@ -188,4 +189,9 @@ lint-go:
 lint-cpp:
 	@echo "$(YELLOW)检查 C++ 代码...$(NC)"
 	@which cppcheck > /dev/null && cppcheck $(CPP_DIR)/src $(CPP_DIR)/include 2>/dev/null || echo "警告: 需要安装 cppcheck"
+
+## install-hooks: 安装 Git hooks
+install-hooks:
+	@echo "$(YELLOW)安装 Git hooks...$(NC)"
+	@$(SCRIPTS_DIR)/install-git-hooks.sh
 

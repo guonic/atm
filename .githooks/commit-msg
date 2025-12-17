@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# commit-msg hook - 检查提交信息格式
+# 遵循 Conventional Commits 规范
+# 注意：只对 main 分支的合并提交进行检查，开发分支可以跳过
+
+set -e
+
+# 获取提交信息文件路径
+commit_msg_file="$1"
+
+# 获取当前分支名称
+current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+# 检查是否是合并提交
+is_merge_commit=false
+if git rev-parse --verify MERGE_HEAD >/dev/null 2>&1; then
+    is_merge_commit=true
+fi
+
+# 检查目标分支（如果是合并提交）
+merge_target=""
+if [ "$is_merge_commit" = true ]; then
+    # 尝试从提交信息中提取目标分支
+    # 或者检查当前分支
+    if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
+        merge_target="main"
+    fi
+fi
+
+# 如果不是 main 分支的合并提交，跳过检查
+# 允许开发分支（develop, feature/*, fix/*, etc.）自由提交
+if [ "$current_branch" != "main" ] && [ "$current_branch" != "master" ]; then
+    # 检查是否是合并到 main 的操作
+    if [ "$is_merge_commit" = true ] && [ "$merge_target" = "main" ]; then
+        # 这是合并到 main 的操作，需要检查
+        echo "检测到合并到 main 分支，将进行提交信息检查..."
+    else
+        # 开发分支的普通提交，跳过严格检查
+        echo "当前分支: $current_branch (开发分支，跳过严格检查)"
+        exit 0
+    fi
+fi
+
+# 读取提交信息
+commit_msg=$(cat "$commit_msg_file")
+
+# 提交信息格式：<type>(<scope>): <subject>
+# 或者：<type>: <subject>
+
+# 定义允许的提交类型
+allowed_types=("feat" "fix" "docs" "style" "refactor" "perf" "test" "build" "ci" "chore" "revert")
+
+# 定义允许的 scope（可选，如果使用）
+allowed_scopes=("python" "go" "cpp" "trading" "data" "api" "config" "storage" "analysis" "strategy" "execution" "risk" "collector" "processor" "docker" "scripts" "docs" "proto")
+
+# 检查提交信息是否为空
+if [ -z "$commit_msg" ]; then
+    echo "❌ 错误: 提交信息不能为空"
+    exit 1
+fi
+
+# 获取第一行（subject）
+first_line=$(echo "$commit_msg" | head -n 1)
+
+# 检查是否以 # 开头（注释行，允许）
+if [[ "$first_line" =~ ^# ]]; then
+    exit 0
+fi
+
+# 检查格式：type(scope): subject 或 type: subject
+# 使用更兼容的正则表达式语法
+pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?: .+"
+if [[ ! "$first_line" =~ $pattern ]]; then
+    echo "❌ 错误: 提交信息格式不正确"
+    echo ""
+    echo "正确格式: <type>(<scope>): <subject>"
+    echo "或者:     <type>: <subject>"
+    echo ""
+    echo "允许的类型: ${allowed_types[*]}"
+    echo ""
+    echo "示例:"
+    echo "  feat(trading): add order execution engine"
+    echo "  fix(data): correct timestamp parsing"
+    echo "  docs: update API documentation"
+    echo ""
+    echo "您的提交信息:"
+    echo "  $first_line"
+    exit 1
+fi
+
+# 提取类型和 scope
+if [[ "$first_line" =~ ^([^:]+): ]]; then
+    type_scope="${BASH_REMATCH[1]}"
+    
+    # 检查是否有 scope
+    if [[ "$type_scope" =~ ^([^(]+)\(([^)]+)\)$ ]]; then
+        type="${BASH_REMATCH[1]}"
+        scope="${BASH_REMATCH[2]}"
+        
+        # 检查类型是否允许
+        if [[ ! " ${allowed_types[@]} " =~ " ${type} " ]]; then
+            echo "❌ 错误: 未知的提交类型 '$type'"
+            echo "允许的类型: ${allowed_types[*]}"
+            exit 1
+        fi
+        
+        # 检查 scope 是否允许（可选检查，如果 scope 不在列表中会警告但不阻止）
+        if [[ ! " ${allowed_scopes[@]} " =~ " ${scope} " ]]; then
+            echo "⚠️  警告: scope '$scope' 不在推荐列表中"
+            echo "推荐的 scope: ${allowed_scopes[*]}"
+            echo "（这不会阻止提交，但建议使用推荐的 scope）"
+        fi
+    else
+        # 只有类型，没有 scope
+        type="$type_scope"
+        
+        # 检查类型是否允许
+        if [[ ! " ${allowed_types[@]} " =~ " ${type} " ]]; then
+            echo "❌ 错误: 未知的提交类型 '$type'"
+            echo "允许的类型: ${allowed_types[*]}"
+            exit 1
+        fi
+    fi
+fi
+
+# 检查 subject 长度（不超过 50 个字符，但允许到 72）
+subject=$(echo "$first_line" | sed -E 's/^[^:]+: //')
+subject_length=${#subject}
+
+if [ $subject_length -gt 72 ]; then
+    echo "⚠️  警告: subject 长度超过 72 个字符（当前: $subject_length）"
+    echo "建议将 subject 保持在 50 个字符以内，详细描述放在 body 中"
+fi
+
+# 检查是否有 body，如果有，检查每行长度
+if [ $(echo "$commit_msg" | wc -l) -gt 1 ]; then
+    body_lines=$(echo "$commit_msg" | tail -n +2)
+    while IFS= read -r line; do
+        # 跳过空行和注释行
+        if [[ -z "$line" || "$line" =~ ^# ]]; then
+            continue
+        fi
+        
+        line_length=${#line}
+        if [ $line_length -gt 72 ]; then
+            echo "⚠️  警告: body 中的某行长度超过 72 个字符"
+            echo "建议每行不超过 72 个字符"
+        fi
+    done <<< "$body_lines"
+fi
+
+# 检查是否包含 BREAKING CHANGE
+if echo "$commit_msg" | grep -qi "BREAKING CHANGE"; then
+    if [[ ! "$type" =~ ^(feat|fix)$ ]]; then
+        echo "⚠️  警告: BREAKING CHANGE 通常只用于 feat 或 fix 类型"
+    fi
+    if [[ ! "$first_line" =~ !$ ]]; then
+        echo "⚠️  警告: 包含 BREAKING CHANGE 时，建议在 type 后添加 !，如: feat!: ..."
+    fi
+fi
+
+echo "✓ 提交信息格式检查通过"
+exit 0
+

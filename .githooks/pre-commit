@@ -1,0 +1,128 @@
+#!/bin/bash
+
+# pre-commit hook - 提交前检查
+
+# 不使用 set -e，手动处理错误，避免静默失败
+set +e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}运行 pre-commit 检查...${NC}"
+
+# 检查是否有未跟踪的文件包含敏感信息
+sensitive_patterns=(
+    "password"
+    "secret"
+    "api_key"
+    "private_key"
+    ".env"
+    "*.pem"
+    "*.key"
+)
+
+staged_files=$(git diff --cached --name-only)
+
+for file in $staged_files; do
+    # 跳过已删除的文件
+    if [ ! -f "$file" ]; then
+        continue
+    fi
+    
+    # 检查文件名
+    for pattern in "${sensitive_patterns[@]}"; do
+        if [[ "$file" == *"$pattern"* ]]; then
+            echo -e "${RED}❌ 错误: 检测到可能包含敏感信息的文件: $file${NC}"
+            echo -e "${YELLOW}请确保不要提交敏感信息（密码、密钥等）${NC}"
+            exit 1
+        fi
+    done
+    
+    # 检查文件内容（简单检查）
+    if [[ "$file" == *.env || "$file" == *.secret ]]; then
+        echo -e "${RED}❌ 错误: 检测到敏感文件: $file${NC}"
+        echo -e "${YELLOW}请使用 .env.example 作为模板，不要提交实际的 .env 文件${NC}"
+        exit 1
+    fi
+done
+
+# 检查是否有大文件（超过 10MB）
+large_files=""
+staged_files_list=$(git diff --cached --name-only)
+
+for file in $staged_files_list; do
+    if [ ! -f "$file" ]; then
+        continue
+    fi
+    
+    # 获取文件大小（兼容 macOS 和 Linux）
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        file_size=$(stat -f%z "$file" 2>/dev/null || echo "0")
+    else
+        file_size=$(stat -c%s "$file" 2>/dev/null || echo "0")
+    fi
+    
+    # 检查是否超过 10MB (10485760 bytes)
+    if [ "$file_size" -gt 10485760 ] 2>/dev/null; then
+        if [ -z "$large_files" ]; then
+            large_files="$file"
+        else
+            large_files="$large_files"$'\n'"$file"
+        fi
+    fi
+done
+
+if [ -n "$large_files" ]; then
+    echo -e "${YELLOW}⚠️  警告: 检测到大文件（>10MB）:${NC}"
+    echo "$large_files"
+    echo -e "${YELLOW}建议使用 Git LFS 或从仓库中移除大文件${NC}"
+    # 在非交互式环境中，跳过用户输入
+    if [ -t 0 ]; then
+        read -p "是否继续提交? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}非交互式环境，跳过大文件检查${NC}"
+    fi
+fi
+
+# 检查 Python 代码格式（如果安装了 black）
+if command -v black &> /dev/null; then
+    python_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' 2>/dev/null || true)
+    if [ -n "$python_files" ]; then
+        echo -e "${GREEN}检查 Python 代码格式...${NC}"
+        # 只检查，不自动修复
+        black --check $python_files >/dev/null 2>&1
+        black_exit_code=$?
+        if [ $black_exit_code -ne 0 ]; then
+            echo -e "${YELLOW}⚠️  警告: Python 代码格式不符合规范${NC}"
+            echo -e "${YELLOW}运行 'make format-python' 或 'black .' 来格式化代码${NC}"
+            # 不阻止提交，只警告
+        fi
+    fi
+fi
+
+# 检查 Go 代码格式（如果安装了 gofmt）
+if command -v gofmt &> /dev/null; then
+    go_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' 2>/dev/null || true)
+    if [ -n "$go_files" ]; then
+        echo -e "${GREEN}检查 Go 代码格式...${NC}"
+        # 检查格式
+        unformatted=$(gofmt -l $go_files 2>/dev/null || true)
+        if [ -n "$unformatted" ]; then
+            echo -e "${YELLOW}⚠️  警告: Go 代码格式不符合规范${NC}"
+            echo -e "${YELLOW}运行 'make format-go' 或 'gofmt -w .' 来格式化代码${NC}"
+            # 不阻止提交，只警告
+        fi
+    fi
+fi
+
+# 所有检查完成
+echo -e "${GREEN}✓ pre-commit 检查通过${NC}"
+exit 0
+

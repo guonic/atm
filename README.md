@@ -30,6 +30,12 @@ cd atm
 make dev-setup
 ```
 
+3. **安装 Git Hooks（推荐）**
+```bash
+make install-hooks
+```
+这将安装提交信息格式检查和代码质量检查的 Git hooks。
+
 3. **启动数据库**
 ```bash
 make storage-start
@@ -96,7 +102,11 @@ make
 
 ## 文档
 
-- [项目结构](docs/PROJECT_STRUCTURE.md)
+- [项目结构](docs/PROJECT_STRUCTURE.md) - 详细的目录结构说明
+- [提交规范](docs/COMMIT_CONVENTION.md) - Git 提交信息规范
+- [分支命名规范](docs/BRANCH_NAMING.md) - Git 分支命名规范
+- [Git Hooks](docs/GIT_HOOKS.md) - Git hooks 使用指南
+- [贡献指南](docs/CONTRIBUTING.md) - 如何为项目做贡献
 - [架构设计](docs/ARCHITECTURE.md) (待完善)
 - [API 文档](docs/API.md) (待完善)
 - [开发指南](docs/DEVELOPMENT.md) (待完善)

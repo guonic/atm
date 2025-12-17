@@ -101,6 +101,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Git hooks (保留 .githooks 目录，但忽略 .git/hooks 中的安装文件)
+# .git/hooks/ 是 Git 自动管理的，不需要提交
+
 # Local Storage
 storage/database/data
 storage/database/*.sql

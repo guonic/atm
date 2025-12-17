@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# pre-push hook - 推送前检查分支命名和提交规范
+
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# 获取要推送的分支
+while read local_ref local_sha remote_ref remote_sha
+do
+    if [ -z "$local_sha" ]; then
+        # 分支删除，跳过检查
+        continue
+    fi
+    
+    # 提取分支名称
+    branch_name=$(echo "$local_ref" | sed 's|refs/heads/||')
+    
+    echo -e "${GREEN}检查分支: $branch_name${NC}"
+    
+    # 允许的主分支
+    if [ "$branch_name" = "main" ] || [ "$branch_name" = "master" ] || [ "$branch_name" = "develop" ]; then
+        echo -e "${GREEN}✓ 主分支，允许推送${NC}"
+        continue
+    fi
+    
+    # 分支命名规范检查
+    valid_patterns=(
+        "^feature/[a-z0-9-]+$"
+        "^fix/[a-z0-9-]+$"
+        "^hotfix/[a-z0-9-]+$"
+        "^release/[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9-]+)?$"
+        "^chore/[a-z0-9-]+$"
+        "^docs/[a-z0-9-]+$"
+        "^test/[a-z0-9-]+$"
+    )
+    
+    is_valid=false
+    for pattern in "${valid_patterns[@]}"; do
+        if [[ "$branch_name" =~ $pattern ]]; then
+            is_valid=true
+            break
+        fi
+    done
+    
+    if [ "$is_valid" = false ]; then
+        echo -e "${RED}❌ 错误: 分支名称不符合规范${NC}"
+        echo ""
+        echo -e "${YELLOW}分支命名规范:${NC}"
+        echo "  - feature/<name>    - 新功能"
+        echo "  - fix/<name>        - Bug 修复"
+        echo "  - hotfix/<name>     - 紧急修复"
+        echo "  - release/<version> - 发布版本"
+        echo "  - chore/<name>      - 杂项任务"
+        echo "  - docs/<name>       - 文档"
+        echo "  - test/<name>       - 测试"
+        echo ""
+        echo -e "${YELLOW}示例:${NC}"
+        echo "  ✅ feature/order-execution"
+        echo "  ✅ fix/memory-leak"
+        echo "  ✅ release/1.0.0"
+        echo "  ❌ $branch_name"
+        echo ""
+        echo -e "${YELLOW}请重命名分支:${NC}"
+        echo "  git branch -m <old-name> <new-name>"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ 分支名称符合规范${NC}"
+    
+    # 如果是推送到 main 分支，进行额外检查
+    if [ "$remote_ref" = "refs/heads/main" ] || [ "$remote_ref" = "refs/heads/master" ]; then
+        echo -e "${YELLOW}⚠️  警告: 您正在推送到 main 分支${NC}"
+        echo -e "${YELLOW}建议通过 Pull Request 合并到 main 分支${NC}"
+        
+        # 检查是否有未审查的提交
+        commits=$(git rev-list $remote_sha..$local_sha 2>/dev/null || echo "")
+        if [ -n "$commits" ]; then
+            commit_count=$(echo "$commits" | wc -l | tr -d ' ')
+            echo -e "${YELLOW}检测到 $commit_count 个新提交${NC}"
+            
+            # 检查提交信息格式
+            echo -e "${GREEN}检查提交信息格式...${NC}"
+            invalid_commits=0
+            # 定义提交信息格式的正则表达式
+            commit_pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?: .+"
+            while IFS= read -r commit; do
+                if [ -z "$commit" ]; then
+                    continue
+                fi
+                commit_msg=$(git log -1 --format=%s "$commit" 2>/dev/null || echo "")
+                if [ -z "$commit_msg" ]; then
+                    continue
+                fi
+                if [[ ! "$commit_msg" =~ $commit_pattern ]]; then
+                    echo -e "${RED}❌ 提交信息格式不正确: $commit${NC}"
+                    echo "  信息: $commit_msg"
+                    invalid_commits=$((invalid_commits + 1))
+                fi
+            done <<< "$commits"
+            
+            if [ $invalid_commits -gt 0 ]; then
+                echo -e "${RED}❌ 发现 $invalid_commits 个提交信息不符合规范${NC}"
+                echo -e "${YELLOW}请修改提交信息或使用 'git commit --amend'${NC}"
+                exit 1
+            fi
+        fi
+    fi
+done
+
+echo -e "${GREEN}✓ 所有检查通过${NC}"
+exit 0
+
