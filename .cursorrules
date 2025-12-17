@@ -25,7 +25,7 @@
 ### 目录结构
 - `python/atm/` - 主包目录
   - `config/` - 配置管理
-  - `data/` - 数据处理（collector, processor, storage）
+  - `data/` - 数据处理（dataingestor, processor, storage）
   - `trading/` - 交易模块（strategy, execution, risk）
   - `analysis/` - 分析模块（indicators, backtest）
   - `api/` - API 服务（rest, grpc）
@@ -36,11 +36,12 @@
 - 遵循 PEP 8 代码风格
 - 使用类型提示（Type Hints）
 - 模块使用 `__init__.py`
-- 包名使用小写字母和下划线：`atm`, `data_collector`
-- 类名使用驼峰命名：`DataCollector`, `TradingStrategy`
+- 包名使用小写字母和下划线：`atm`, `data_ingestor`
+- 类名使用驼峰命名：`DataIngestor`, `TradingStrategy`
 - 函数和变量使用小写下划线：`collect_data()`, `trading_config`
 - 常量使用全大写下划线：`MAX_POSITION_SIZE`, `DEFAULT_TIMEOUT`
 - 采用英文注释、文档
+- 所有import应放置在文件的开始位置，并且保持排序
 
 ### 文件命名
 - 模块文件：`snake_case.py`
@@ -60,7 +61,7 @@ import pandas as pd
 
 # 本地模块
 from atm.config import loader
-from atm.data.collector import DataCollector
+from atm.data.dataingestor import DataIngestorService
 ```
 
 ### 文档字符串
@@ -70,7 +71,7 @@ from atm.data.collector import DataCollector
 ## Golang 代码规范
 
 ### 目录结构
-- `go/cmd/` - 可执行程序入口（trader, collector, api）
+- `go/cmd/` - 可执行程序入口（trader, dataingestor, api）
 - `go/internal/` - 内部包（不对外暴露）
 - `go/pkg/` - 公共包（可被外部引用）
 - `go/api/` - API 定义和生成代码
@@ -112,7 +113,7 @@ from atm.data.collector import DataCollector
 - 使用 C++17 标准
 - 遵循 Google C++ Style Guide 或 LLVM Style Guide
 - 命名空间：`namespace atm { namespace core { } }`
-- 类名使用驼峰命名：`DataCollector`, `TradingStrategy`
+- 类名使用驼峰命名：`DataIngestor`, `TradingStrategy`
 - 函数和变量使用驼峰命名：`collectData()`, `tradingConfig`
 - 常量使用全大写下划线：`MAX_POSITION_SIZE`, `DEFAULT_TIMEOUT`
 - 私有成员使用下划线前缀：`private_data_`, `internal_state_`
@@ -264,7 +265,7 @@ from atm.data.collector import DataCollector
 **影响范围 (scope)**：
 - 按语言：`python`, `go`, `cpp`
 - 按模块：`trading`, `data`, `api`, `config`, `storage`, `analysis`
-- 按功能：`strategy`, `execution`, `risk`, `collector`, `processor`
+- 按功能：`strategy`, `execution`, `risk`, `dataingestor`, `processor`
 
 **示例**：
 ```

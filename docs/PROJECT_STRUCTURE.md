@@ -66,7 +66,7 @@ atm/
 │   │   │
 │   │   ├── data/                 # 数据处理
 │   │   │   ├── __init__.py
-│   │   │   ├── collector/       # 数据采集
+│   │   │   ├── dataingestor/   # 数据摄取
 │   │   │   ├── processor/       # 数据处理
 │   │   │   └── storage/         # 数据存储
 │   │   │
@@ -102,7 +102,7 @@ atm/
 │   │
 │   └── examples/                # Python 示例
 │       ├── strategy_example.py
-│       └── data_collector_example.py
+│       └── dataingestor_example.py
 │
 ├── go/                           # Golang 代码
 │   ├── go.mod                    # Go 模块定义
@@ -112,7 +112,7 @@ atm/
 │   ├── cmd/                      # 可执行程序入口
 │   │   ├── trader/              # 交易服务
 │   │   │   └── main.go
-│   │   ├── collector/           # 数据采集服务
+│   │   ├── dataingestor/         # 数据摄取服务
 │   │   │   └── main.go
 │   │   └── api/                 # API 服务
 │   │       └── main.go
@@ -120,7 +120,7 @@ atm/
 │   ├── internal/                 # 内部包（不对外暴露）
 │   │   ├── config/               # 配置管理
 │   │   ├── data/                # 数据处理
-│   │   │   ├── collector/       # 数据采集
+│   │   │   ├── dataingestor/   # 数据摄取
 │   │   │   ├── processor/       # 数据处理
 │   │   │   └── storage/         # 数据存储
 │   │   ├── trading/             # 交易模块
@@ -157,7 +157,7 @@ atm/
 │   │       │   ├── types.hpp
 │   │       │   └── config.hpp
 │   │       ├── data/             # 数据处理
-│   │       │   ├── collector.hpp
+│   │       │   ├── dataingestor.hpp
 │   │       │   └── processor.hpp
 │   │       ├── trading/           # 交易模块
 │   │       │   ├── strategy.hpp

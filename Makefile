@@ -40,7 +40,8 @@ help:
 	@echo "  $(YELLOW)make storage-status$(NC) - 查看数据库状态"
 	@echo "  $(YELLOW)make format$(NC)         - 格式化代码"
 	@echo "  $(YELLOW)make lint$(NC)           - 代码检查"
-	@echo "  $(YELLOW)make install-hooks$(NC)  - 安装 Git hooks"
+	@echo "  $(YELLOW)make install-hooks$(NC)  - 安装 Git hooks
+  $(YELLOW)make venv$(NC)           - 创建 Python 虚拟环境"
 
 ## build: 构建所有语言
 build: proto build-python build-go build-cpp
@@ -104,10 +105,21 @@ clean:
 install: install-python install-go
 	@echo "$(GREEN)✓ 依赖安装完成$(NC)"
 
+## venv: 创建 Python 虚拟环境
+venv:
+	@echo "$(YELLOW)创建 Python 虚拟环境...$(NC)"
+	@python3 -m venv venv || echo "警告: 虚拟环境创建失败"
+	@echo "$(GREEN)✓ 虚拟环境已创建$(NC)"
+	@echo "激活虚拟环境: source venv/bin/activate"
+
 ## install-python: 安装 Python 依赖
 install-python:
 	@echo "$(YELLOW)安装 Python 依赖...$(NC)"
-	@cd $(PYTHON_DIR) && pip install -e ".[dev]" || echo "警告: Python 依赖安装失败"
+	@if [ -d "venv" ]; then \
+		. venv/bin/activate && cd $(PYTHON_DIR) && pip install -e ".[dev]" || echo "警告: Python 依赖安装失败"; \
+	else \
+		echo "警告: 虚拟环境不存在，请先运行 'make venv'"; \
+	fi
 
 ## install-go: 安装 Go 依赖
 install-go:

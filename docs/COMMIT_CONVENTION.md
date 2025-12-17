@@ -56,7 +56,7 @@
 
 - **test**: 测试相关变更
   ```
-  test(python): add unit tests for data collector
+  test(python): add unit tests for data ingestor
   ```
 
 - **build**: 构建系统或外部依赖变更
@@ -100,7 +100,7 @@ Scope 用于说明提交影响的范围，可以是：
 - `strategy` - 策略相关
 - `execution` - 执行相关
 - `risk` - 风险管理
-- `collector` - 数据采集
+- `dataingestor` - 数据摄取
 - `processor` - 数据处理
 
 ### 其他
@@ -114,7 +114,7 @@ Scope 用于说明提交影响的范围，可以是：
 ### 简单提交（只有 type 和 subject）
 
 ```
-feat: add data collector module
+feat: add data ingestor module
 ```
 
 ```

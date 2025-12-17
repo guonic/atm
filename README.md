@@ -25,7 +25,27 @@ git clone <repository-url>
 cd atm
 ```
 
-2. **设置开发环境**
+2. **创建并激活 Python 虚拟环境**
+```bash
+# 创建虚拟环境（如果还没有）
+python3 -m venv venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source venv/bin/activate
+# Windows:
+# venv\Scripts\activate
+
+# 安装依赖
+cd python
+# 安装基础依赖和开发依赖
+pip install -e ".[dev]"
+# 安装 Tushare 数据源依赖（用于数据同步）
+pip install -e ".[tushare]"
+cd ..
+```
+
+3. **设置开发环境**
 ```bash
 make dev-setup
 ```
@@ -36,14 +56,18 @@ make install-hooks
 ```
 这将安装提交信息格式检查和代码质量检查的 Git hooks。
 
-3. **启动数据库**
+4. **启动数据库**
 ```bash
 make storage-start
 # 或者
 ./scripts/controller.sh storage start
+
+# 同步股票基础信息（覆盖模式）
+export TUSHARE_TOKEN=your_tushare_token
+./scripts/controller.sh sync stock-basic
 ```
 
-4. **构建项目**
+5. **构建项目**
 ```bash
 make build
 # 或者构建特定语言
@@ -74,7 +98,10 @@ make help
 #### Python 开发
 ```bash
 cd python
+# 安装基础依赖和开发依赖
 pip install -e ".[dev]"
+# 安装 Tushare 数据源依赖（用于数据同步）
+pip install -e ".[tushare]"
 pytest
 ```
 

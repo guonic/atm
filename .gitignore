@@ -107,4 +107,6 @@ Thumbs.db
 # Local Storage
 storage/database/data
 storage/database/*.sql
+storage/state/*.json
+storage/locks/*.lock
 

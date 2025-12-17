@@ -1,3 +1,5 @@
+pydantic
+backtrader
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -28,6 +30,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "pydantic>=1.10.0",
     "pyyaml>=6.0",
+    "requests>=2.28.0",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +49,12 @@ grpc = [
 rest = [
     "fastapi>=0.75.0",
     "uvicorn>=0.17.0",
+]
+tushare = [
+    "tushare>=1.2.10",
+]
+backtrader = [
+    "backtrader>=1.9.78",
 ]
 
 [project.scripts]

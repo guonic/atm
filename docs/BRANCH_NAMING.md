@@ -24,7 +24,7 @@
   - 命名规则：`feature/` + 简短描述（小写，用连字符分隔）
   - 示例：
     - `feature/order-execution`
-    - `feature/data-collector`
+    - `feature/data-ingestor`
     - `feature/api-authentication`
 
 ### 修复分支
@@ -81,7 +81,7 @@
    - ❌ `feature/ORDER_EXECUTION`
 
 2. **使用连字符分隔单词**
-   - ✅ `feature/data-collector`
+   - ✅ `feature/data-ingestor`
    - ❌ `feature/data_collector`
    - ❌ `feature/dataCollector`
 
@@ -104,7 +104,7 @@
 #### 功能分支
 ```
 feature/trading-strategy
-feature/data-collector-api
+feature/data-ingestor-api
 feature/risk-management
 feature/python-api-client
 feature/go-trading-service

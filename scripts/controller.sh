@@ -23,6 +23,9 @@ show_help() {
             - login: 登录数据库
             - psql: 打印 psql 连接命令
 
+  sync      数据同步任务
+            - stock-basic: 同步股票基础信息（覆盖模式）
+
   help      显示此帮助信息
 
 示例:
@@ -30,6 +33,8 @@ show_help() {
   controller.sh storage stop
   controller.sh storage login
   controller.sh storage psql
+  controller.sh sync stock-basic
+  controller.sh sync stock-basic --exchange SSE
   controller.sh help
 
 EOF
@@ -46,6 +51,14 @@ execute_subcommand() {
                 "$SCRIPT_DIR/storage_controller.sh" "$@"
             else
                 echo "错误: 找不到 storage_controller.sh 脚本"
+                exit 1
+            fi
+            ;;
+        sync)
+            if [ -f "$SCRIPT_DIR/sync_controller.sh" ]; then
+                "$SCRIPT_DIR/sync_controller.sh" "$@"
+            else
+                echo "错误: 找不到 sync_controller.sh 脚本"
                 exit 1
             fi
             ;;
