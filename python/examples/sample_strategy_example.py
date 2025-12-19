@@ -5,11 +5,11 @@ This example demonstrates the standard backtrader pattern:
 - Strategy directly inherits from backtrader.Strategy
 - Indicators are initialized in __init__
 - Trading logic in next() method based on indicator states
-- Using StrategyRunner.run_strategy() for convenience
+- Using StrategyRunner with analyzers and plotting
 
 Usage:
-    python backtrader_strategy_direct_example.py --ts-code 000001.SZ --start-date 2025-01-01 --end-date 2025-12-31
-    python backtrader_strategy_direct_example.py --ts-code 000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --short-period 10 --long-period 30
+    python sample_strategy_example.py --ts-code 000001.SZ --start-date 2025-01-01 --end-date 2025-12-31
+    python sample_strategy_example.py --ts-code 000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --short-period 10 --long-period 30 --plot
 """
 
 import argparse
@@ -47,6 +47,18 @@ def add_sma_cross_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=20,
         help="Long SMA period (default: 20)",
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot backtest results (requires matplotlib)",
+    )
+    parser.add_argument(
+        "--plot-style",
+        type=str,
+        default="bar",
+        choices=["bar", "candle", "line"],
+        help="Plot style (default: bar)",
     )
 
 
@@ -88,15 +100,7 @@ def main():
 
     # Parse dates (already validated, so safe to parse)
     start_date, end_date = parse_date_args(args)
-
-    # Load configuration
-    try:
-        config = load_config()
-    except FileNotFoundError as e:
-        logger.error(f"Configuration file not found: {e}")
-        logger.info("Please create a config.yaml file or set environment variables")
-        return
-
+    config = load_config()
     db_config = config.database
 
     # Run strategy with all parameters in one call
@@ -105,7 +109,7 @@ def main():
         f"with short_period={args.short_period}, long_period={args.long_period}"
     )
 
-    results = StrategyRunner.run_strategy(
+    runner = StrategyRunner.run_strategy(
         db_config=db_config,
         strategy_class=SMACrossStrategy,
         ts_code=args.ts_code,
@@ -119,9 +123,19 @@ def main():
             "short_period": args.short_period,
             "long_period": args.long_period,
         },
+        add_analyzers=True,
     )
 
-    StrategyRunner.print_results(results)
+    # Print basic results
+    runner.print_results()
+
+    # Print analyzer results
+    runner.print_analyzer_results()
+
+    # Plot if requested
+    if args.plot:
+        logger.info("Plotting backtest results...")
+        runner.plot(style=args.plot_style)
 
 
 if __name__ == "__main__":
