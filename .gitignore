@@ -110,3 +110,5 @@ storage/database/*.sql
 storage/state/*.json
 storage/locks/*.lock
 
+# outputs
+outputs/

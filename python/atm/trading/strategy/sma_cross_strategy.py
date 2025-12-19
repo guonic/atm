@@ -36,10 +36,12 @@ class SMACrossStrategy(BaseStrategy):
     2. Trading logic is in next() method
     3. Indicators trigger buy/sell operations
     """
+    alias = ('SMA_CrossOver',)
 
     params = (
         ("short_period", 5),  # Short SMA period
         ("long_period", 20),  # Long SMA period
+        ("_movav", bt.indicators.MovAv.SMA) # moving average to use
     )
 
     def __init__(self):
@@ -52,13 +54,13 @@ class SMACrossStrategy(BaseStrategy):
 
         # Initialize indicators in __init__ (backtrader standard pattern)
         # self.datas[0] is the main data feed
-        self.short_sma = bt.indicators.SMA(self.datas[0].close, period=self.params.short_period)
-        self.long_sma = bt.indicators.SMA(self.datas[0].close, period=self.params.long_period)
-        self.crossover = bt.indicators.CrossOver(self.short_sma, self.long_sma)
+        short_sma = self.p._movav(period=self.p.short_period)
+        long_sma = self.p._movav(period=self.p.long_period)
+        self.crossover = bt.indicators.CrossOver(short_sma, long_sma)
 
         logger.info(
-            f"SMA Cross Strategy initialized with short_period={self.params.short_period}, "
-            f"long_period={self.params.long_period}"
+            f"SMA Cross Strategy initialized with short_period={self.p.short_period}, "
+            f"long_period={self.p.long_period}"
         )
 
     def next(self):
@@ -74,13 +76,13 @@ class SMACrossStrategy(BaseStrategy):
         if not self.position:
             # No position: look for buy signal
             # crossover[0] > 0 means short SMA just crossed above long SMA
-            if self.crossover[0] > 0:
+            if self.crossover > 0:
                 logger.debug(f"Golden cross detected at {self.datas[0].datetime.date(0)}, buying")
                 self.buy()  # Buy at market price
         else:
-            # Have position: look for sell signal
+            # Have position: look for sale signal
             # crossover[0] < 0 means short SMA just crossed below long SMA
-            if self.crossover[0] < 0:
+            if self.crossover < 0:
                 logger.debug(f"Death cross detected at {self.datas[0].datetime.date(0)}, selling")
                 self.sell()  # Sell at market price
 
@@ -94,8 +96,8 @@ class SMACrossStrategy(BaseStrategy):
         info = super().get_info()
         info.update(
             {
-                "short_period": self.params.short_period,
-                "long_period": self.params.long_period,
+                "short_period": self.p.short_period,
+                "long_period": self.p.long_period,
             }
         )
         return info

@@ -50,6 +50,7 @@ class StrategyRunner:
         self.commission = commission
         self.slippage = slippage
         self.cerebro = bt.Cerebro()
+        self._last_results: Optional[Any] = None
         self._setup_broker()
 
     def _setup_broker(self):
@@ -103,6 +104,52 @@ class StrategyRunner:
         """
         self.cerebro.addstrategy(strategy_class, **strategy_params)
 
+    def add_analyzers(self) -> None:
+        """
+        Add common analyzers to cerebro.
+
+        Adds analyzers for:
+        - Trade analysis (win/loss, profit/loss, etc.)
+        - Sharpe ratio
+        - Drawdown analysis
+        - Returns analysis
+        """
+        # Trade analyzer
+        self.cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
+        
+        # Sharpe ratio
+        self.cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")
+        
+        # Drawdown analyzer
+        self.cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
+        
+        # Returns analyzer
+        self.cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
+        
+        # Time return analyzer
+        self.cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="timereturn")
+        
+        logger.info("Added analyzers: trades, sharpe, drawdown, returns, timereturn")
+
+    def plot(self, style: str = "bar", plotter: Optional[Any] = None, **kwargs) -> None:
+        """
+        Plot backtest results.
+
+        Args:
+            style: Plot style ('bar', 'candle', 'line', etc.).
+            plotter: Optional custom plotter instance.
+            **kwargs: Additional plotting options.
+        """
+        try:
+            if plotter is None:
+                self.cerebro.plot(style=style, **kwargs)
+            else:
+                plotter.plot(self.cerebro, style=style, **kwargs)
+            logger.info("Plotting completed")
+        except Exception as e:
+            logger.error(f"Failed to plot: {e}")
+            logger.info("Plotting requires matplotlib. Install with: pip install matplotlib")
+
     def run(self) -> Any:
         """
         Run backtest.
@@ -141,9 +188,9 @@ class StrategyRunner:
             "total_return": total_return,
         }
 
-    @classmethod
-    def print_results(self, results) -> None:
+    def print_results(self) -> None:
         """Print backtest results to logger."""
+        results = self.get_results()
         logger.info("=" * 60)
         logger.info("Backtest Results:")
         logger.info("=" * 60)
@@ -153,6 +200,126 @@ class StrategyRunner:
             else:
                 logger.info(f"{key}: {value}")
         logger.info("=" * 60)
+
+    def print_analyzer_results(self) -> None:
+        """Print analyzer results to logger."""
+        analyzer_results = self.get_analyzer_results()
+        if not analyzer_results:
+            logger.info("No analyzer results available")
+            return
+
+        logger.info("=" * 60)
+        logger.info("Analyzer Results:")
+        logger.info("=" * 60)
+
+        # Trade analysis
+        if "trades" in analyzer_results:
+            trades = analyzer_results["trades"]
+            try:
+                if "total" in trades and "total" in trades["total"]:
+                    total_trades = trades["total"]["total"]
+                    logger.info(f"Total Trades: {total_trades}")
+                if "won" in trades and "total" in trades["won"]:
+                    won_trades = trades["won"]["total"]
+                    logger.info(f"Won Trades: {won_trades}")
+                if "lost" in trades and "total" in trades["lost"]:
+                    lost_trades = trades["lost"]["total"]
+                    logger.info(f"Lost Trades: {lost_trades}")
+            except (KeyError, TypeError) as e:
+                logger.warning(f"Failed to parse trade analysis: {e}")
+
+        # Sharpe ratio
+        if "sharpe" in analyzer_results:
+            sharpe = analyzer_results["sharpe"]
+            try:
+                sharpe_ratio = sharpe.get("sharperatio")
+                if sharpe_ratio is not None:
+                    logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+                else:
+                    logger.info("Sharpe Ratio: N/A (insufficient data)")
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning(f"Failed to parse Sharpe ratio: {e}")
+
+        # Drawdown
+        if "drawdown" in analyzer_results:
+            dd = analyzer_results["drawdown"]
+            try:
+                if "max" in dd and dd["max"]:
+                    max_dd = dd["max"].get("drawdown")
+                    max_dd_len = dd["max"].get("len")
+                    if max_dd is not None:
+                        logger.info(f"Max Drawdown: {max_dd:.2f}%")
+                    if max_dd_len is not None:
+                        logger.info(f"Max Drawdown Period: {max_dd_len}")
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning(f"Failed to parse drawdown analysis: {e}")
+
+        # Returns
+        if "returns" in analyzer_results:
+            returns = analyzer_results["returns"]
+            try:
+                rnorm100 = returns.get("rnorm100")
+                if rnorm100 is not None:
+                    logger.info(f"Normalized Return: {rnorm100:.2f}%")
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning(f"Failed to parse returns analysis: {e}")
+
+        logger.info("=" * 60)
+
+    def get_analyzer_results(self) -> Dict[str, Any]:
+        """
+        Get analyzer results from the last run.
+
+        Returns:
+            Dictionary containing analyzer results.
+        """
+        if not hasattr(self, "_last_results") or self._last_results is None:
+            return {}
+
+        results = {}
+        strategy_result = self._last_results[0] if self._last_results else None
+
+        if strategy_result is None:
+            return results
+
+        # Extract analyzer results
+        analyzers = getattr(strategy_result, "analyzers", None)
+        if analyzers is None:
+            return results
+
+        # Trade analyzer
+        if hasattr(analyzers, "trades") and analyzers.trades:
+            try:
+                trade_analysis = analyzers.trades.get_analysis()
+                results["trades"] = trade_analysis
+            except Exception as e:
+                logger.warning(f"Failed to get trade analysis: {e}")
+
+        # Sharpe ratio
+        if hasattr(analyzers, "sharpe") and analyzers.sharpe:
+            try:
+                sharpe_analysis = analyzers.sharpe.get_analysis()
+                results["sharpe"] = sharpe_analysis
+            except Exception as e:
+                logger.warning(f"Failed to get Sharpe ratio: {e}")
+
+        # Drawdown
+        if hasattr(analyzers, "drawdown") and analyzers.drawdown:
+            try:
+                drawdown_analysis = analyzers.drawdown.get_analysis()
+                results["drawdown"] = drawdown_analysis
+            except Exception as e:
+                logger.warning(f"Failed to get drawdown analysis: {e}")
+
+        # Returns
+        if hasattr(analyzers, "returns") and analyzers.returns:
+            try:
+                returns_analysis = analyzers.returns.get_analysis()
+                results["returns"] = returns_analysis
+            except Exception as e:
+                logger.warning(f"Failed to get returns analysis: {e}")
+
+        return results
 
     @classmethod
     def run_strategy(
@@ -167,7 +334,8 @@ class StrategyRunner:
         slippage: float = 0.0,
         schema: str = "quant",
         strategy_params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        add_analyzers: bool = True,
+    ) -> "StrategyRunner":
         """
         Run a strategy with all necessary parameters in one call.
 
@@ -184,9 +352,10 @@ class StrategyRunner:
             slippage: Slippage rate (default: 0.0).
             schema: Database schema name (default: 'quant').
             strategy_params: Strategy parameters dictionary (default: None).
+            add_analyzers: Whether to add analyzers (default: True).
 
         Returns:
-            Dictionary containing backtest results.
+            StrategyRunner instance with results available via get_results() and get_analyzer_results().
         """
         runner = cls(
             db_config=db_config,
@@ -207,7 +376,10 @@ class StrategyRunner:
             **(strategy_params or {}),
         )
 
-        runner.run()
+        if add_analyzers:
+            runner.add_analyzers()
 
-        return runner.get_results()
+        runner._last_results = runner.run()
+
+        return runner
 
