@@ -60,6 +60,14 @@ tushare = [
 backtrader = [
     "backtrader>=1.9.78",
 ]
+kronos = [
+    "torch>=2.0.0",
+    "huggingface-hub>=0.20.0",
+    "safetensors>=0.4.3",
+    "einops>=0.7.0",
+    "tqdm>=4.65.0",
+    "matplotlib>=3.5.0",
+]
 
 [project.scripts]
 atm = "atm.cli:main"

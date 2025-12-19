@@ -42,6 +42,7 @@
 - 常量使用全大写下划线：`MAX_POSITION_SIZE`, `DEFAULT_TIMEOUT`
 - 采用英文注释、文档
 - 所有import应放置在文件的开始位置，并且保持排序
+- 非必须得情况下禁止使用try import语法
 
 ### 文件命名
 - 模块文件：`snake_case.py`
