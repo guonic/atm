@@ -3,20 +3,24 @@ Simple Moving Average (SMA) Cross Strategy.
 
 A simple example strategy that buys when short SMA crosses above long SMA
 and sells when short SMA crosses below long SMA.
+
+This strategy follows the standard backtrader pattern:
+- Indicators are initialized in __init__
+- Trading logic is in next() method
+- Indicators trigger buy/sell operations
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Dict
 
 import backtrader as bt
 
-from atm.trading.strategy.backtrader_strategy import BacktraderStrategy
-from atm.trading.strategy.base import StrategyConfig
+from atm.trading.strategy.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
 
-class SMACrossStrategy(BacktraderStrategy):
+class SMACrossStrategy(BaseStrategy):
     """
     Simple Moving Average Cross Strategy.
 
@@ -26,118 +30,61 @@ class SMACrossStrategy(BacktraderStrategy):
 
     Buy signal: When short SMA crosses above long SMA (golden cross)
     Sell signal: When short SMA crosses below long SMA (death cross)
+
+    This strategy follows backtrader's standard pattern:
+    1. Indicators are initialized in __init__
+    2. Trading logic is in next() method
+    3. Indicators trigger buy/sell operations
     """
 
-    def __init__(self, config: StrategyConfig):
+    params = (
+        ("short_period", 5),  # Short SMA period
+        ("long_period", 20),  # Long SMA period
+    )
+
+    def __init__(self):
         """
         Initialize SMA Cross Strategy.
 
-        Args:
-            config: Strategy configuration. Should include:
-                - params['short_period']: Short SMA period (default: 5)
-                - params['long_period']: Long SMA period (default: 20)
+        Indicators are initialized here following backtrader's standard pattern.
         """
-        super().__init__(config)
+        super().__init__()
 
-        # Get parameters
-        self.short_period = self.params.get("short_period", 5)
-        self.long_period = self.params.get("long_period", 20)
+        # Initialize indicators in __init__ (backtrader standard pattern)
+        # self.datas[0] is the main data feed
+        self.short_sma = bt.indicators.SMA(self.datas[0].close, period=self.params.short_period)
+        self.long_sma = bt.indicators.SMA(self.datas[0].close, period=self.params.long_period)
+        self.crossover = bt.indicators.CrossOver(self.short_sma, self.long_sma)
 
-        # Indicators will be initialized in start()
-        self.short_sma: Optional[bt.indicators.SMA] = None
-        self.long_sma: Optional[bt.indicators.SMA] = None
-        self.crossover: Optional[bt.indicators.CrossOver] = None
-
-    def start(self) -> None:
-        """Called when the strategy starts running."""
-        super().start()
         logger.info(
-            f"SMA Cross Strategy started with short_period={self.short_period}, "
-            f"long_period={self.long_period}"
+            f"SMA Cross Strategy initialized with short_period={self.params.short_period}, "
+            f"long_period={self.params.long_period}"
         )
 
-        # Initialize indicators
-        # Note: _datas is set by BacktraderStrategyWrapper in start() method
-        if hasattr(self, "_datas") and self._datas and len(self._datas) > 0:
-            data = self._datas[0]
-            self.short_sma = bt.indicators.SMA(data.close, period=self.short_period)
-            self.long_sma = bt.indicators.SMA(data.close, period=self.long_period)
-            self.crossover = bt.indicators.CrossOver(self.short_sma, self.long_sma)
-
-    def next(self, data: Any) -> None:
+    def next(self):
         """
-        Called for each bar in the data feed.
+        Called for each bar.
 
-        Args:
-            data: Current bar data from backtrader.
+        Trading logic based on indicator states:
+        - Golden cross (short SMA crosses above long SMA) -> Buy
+        - Death cross (short SMA crosses below long SMA) -> Sell
         """
-        if self.crossover is None:
-            return
-
         # Check if we have a position
-        # Note: _broker is set by BacktraderStrategyWrapper in start() method
-        if not hasattr(self, "_broker") or self._broker is None:
-            return
-        position = self._broker.getposition(data).size
-
-        # Golden cross: short SMA crosses above long SMA -> Buy
-        if self.crossover[0] > 0 and position == 0:
-            logger.debug(f"Golden cross detected at {data.datetime.date(0)}, buying")
-            self.buy(data=data)
-
-        # Death cross: short SMA crosses below long SMA -> Sell
-        elif self.crossover[0] < 0 and position > 0:
-            logger.debug(f"Death cross detected at {data.datetime.date(0)}, selling")
-            self.sell(data=data)
-
-    def notify_order(self, order: Any) -> None:
-        """
-        Called when an order status changes.
-
-        Args:
-            order: Order object.
-        """
-        if order.status in [order.Submitted, order.Accepted]:
-            return
-
-        if order.status in [order.Completed]:
-            if order.isbuy():
-                logger.info(
-                    f"BUY EXECUTED: Price={order.executed.price:.2f}, "
-                    f"Size={order.executed.size}, Cost={order.executed.value:.2f}, "
-                    f"Comm={order.executed.comm:.2f}"
-                )
-            else:
-                logger.info(
-                    f"SELL EXECUTED: Price={order.executed.price:.2f}, "
-                    f"Size={order.executed.size}, Cost={order.executed.value:.2f}, "
-                    f"Comm={order.executed.comm:.2f}"
-                )
-        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            logger.warning(f"Order {order.ref} {order.getstatusname()}")
-
-    def notify_trade(self, trade: Any) -> None:
-        """
-        Called when a trade is closed.
-
-        Args:
-            trade: Trade object.
-        """
-        if not trade.isclosed:
-            return
-
-        # Calculate return percentage, avoiding division by zero
-        if trade.value != 0:
-            return_pct = trade.pnlcomm / trade.value * 100
+        # In backtrader, self.position gives the current position size
+        if not self.position:
+            # No position: look for buy signal
+            # crossover[0] > 0 means short SMA just crossed above long SMA
+            if self.crossover[0] > 0:
+                logger.debug(f"Golden cross detected at {self.datas[0].datetime.date(0)}, buying")
+                self.buy()  # Buy at market price
         else:
-            return_pct = 0.0
+            # Have position: look for sell signal
+            # crossover[0] < 0 means short SMA just crossed below long SMA
+            if self.crossover[0] < 0:
+                logger.debug(f"Death cross detected at {self.datas[0].datetime.date(0)}, selling")
+                self.sell()  # Sell at market price
 
-        logger.info(
-            f"TRADE PROFIT: Gross={trade.pnl:.2f}, Net={trade.pnlcomm:.2f}, "
-            f"Return={return_pct:.2f}%"
-        )
-
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> Dict:
         """
         Get strategy information.
 
@@ -147,8 +94,8 @@ class SMACrossStrategy(BacktraderStrategy):
         info = super().get_info()
         info.update(
             {
-                "short_period": self.short_period,
-                "long_period": self.long_period,
+                "short_period": self.params.short_period,
+                "long_period": self.params.long_period,
             }
         )
         return info

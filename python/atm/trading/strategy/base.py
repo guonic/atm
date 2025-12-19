@@ -1,14 +1,16 @@
 """
-Base strategy class for trading strategies.
+Strategy base classes and configuration.
 
-Provides abstract interface for all trading strategies.
+Provides base class for backtrader strategies and configuration model.
 """
 
-from abc import ABC, abstractmethod
-from datetime import datetime
+import logging
 from typing import Any, Dict, Optional
 
+import backtrader as bt
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyConfig(BaseModel):
@@ -22,68 +24,112 @@ class StrategyConfig(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict, description="Strategy parameters")
 
 
-class BaseStrategy(ABC):
+class BaseStrategy(bt.Strategy):
     """
-    Base class for all trading strategies.
+    Base class for backtrader strategies.
 
-    All trading strategies should inherit from this class and implement
-    the required abstract methods.
+    This class directly inherits from backtrader.Strategy and follows
+    the standard backtrader pattern:
+    - Indicators are initialized in __init__
+    - Trading logic is in next() method
+    - Indicators trigger buy/sell operations
+
+    Subclasses should:
+    1. Initialize indicators in __init__
+    2. Implement trading logic in next() based on indicator states
+    3. Optionally override notify_order() and notify_trade() for logging
     """
 
-    def __init__(self, config: StrategyConfig):
+    params = (
+        ("strategy_config", None),  # StrategyConfig instance
+    )
+
+    def __init__(self):
+        """Initialize strategy."""
+        super().__init__()
+        self.config: Optional[StrategyConfig] = self.params.strategy_config
+
+        # Store strategy info
+        if self.config:
+            self.strategy_name = self.config.name
+            self.strategy_description = self.config.description
+        else:
+            self.strategy_name = self.__class__.__name__
+            self.strategy_description = ""
+
+        logger.info(f"Strategy {self.strategy_name} initialized")
+
+    def start(self):
+        """Called when strategy starts."""
+        logger.info(f"Strategy {self.strategy_name} started")
+
+    def next(self):
         """
-        Initialize base strategy.
+        Called for each bar.
 
-        Args:
-            config: Strategy configuration.
-        """
-        self.config = config
-        self.name = config.name
-        self.description = config.description
-        self.initial_cash = config.initial_cash
-        self.commission = config.commission
-        self.slippage = config.slippage
-        self.params = config.params
+        Subclasses should override this method to implement trading logic
+        based on indicator states.
 
-    @abstractmethod
-    def next(self, data: Any) -> None:
-        """
-        Called for each bar in the data feed.
-
-        This is the main strategy logic that should be implemented by subclasses.
-
-        Args:
-            data: Current bar data.
+        Example:
+            if self.crossover[0] > 0 and not self.position:
+                self.buy()
         """
         pass
 
-    @abstractmethod
-    def start(self) -> None:
-        """Called when the strategy starts running."""
-        pass
+    def stop(self):
+        """Called when strategy stops."""
+        logger.info(f"Strategy {self.strategy_name} stopped")
 
-    @abstractmethod
-    def stop(self) -> None:
-        """Called when the strategy stops running."""
-        pass
-
-    def notify_order(self, order: Any) -> None:
+    def notify_order(self, order):
         """
         Called when an order status changes.
+
+        Subclasses can override this for custom logging.
 
         Args:
             order: Order object.
         """
-        pass
+        if order.status in [order.Submitted, order.Accepted]:
+            return
 
-    def notify_trade(self, trade: Any) -> None:
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                logger.info(
+                    f"BUY EXECUTED: Price={order.executed.price:.2f}, "
+                    f"Size={order.executed.size}, Cost={order.executed.value:.2f}, "
+                    f"Comm={order.executed.comm:.2f}"
+                )
+            else:
+                logger.info(
+                    f"SELL EXECUTED: Price={order.executed.price:.2f}, "
+                    f"Size={order.executed.size}, Cost={order.executed.value:.2f}, "
+                    f"Comm={order.executed.comm:.2f}"
+                )
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            logger.warning(f"Order {order.ref} {order.getstatusname()}")
+
+    def notify_trade(self, trade):
         """
         Called when a trade is closed.
+
+        Subclasses can override this for custom logging.
 
         Args:
             trade: Trade object.
         """
-        pass
+        if not trade.isclosed:
+            return
+
+        # Calculate return percentage, avoiding division by zero
+        if trade.value != 0:
+            return_pct = trade.pnlcomm / trade.value * 100
+        else:
+            return_pct = 0.0
+
+        logger.info(
+            f"TRADE PROFIT: Gross={trade.pnl:.2f}, Net={trade.pnlcomm:.2f}, "
+            f"Return={return_pct:.2f}%"
+        )
 
     def get_info(self) -> Dict[str, Any]:
         """
@@ -92,12 +138,18 @@ class BaseStrategy(ABC):
         Returns:
             Dictionary containing strategy information.
         """
-        return {
-            "name": self.name,
-            "description": self.description,
-            "initial_cash": self.initial_cash,
-            "commission": self.commission,
-            "slippage": self.slippage,
-            "params": self.params,
+        info = {
+            "name": self.strategy_name,
+            "description": self.strategy_description,
         }
+        if self.config:
+            info.update(
+                {
+                    "initial_cash": self.config.initial_cash,
+                    "commission": self.config.commission,
+                    "slippage": self.config.slippage,
+                    "params": self.config.params,
+                }
+            )
+        return info
 
