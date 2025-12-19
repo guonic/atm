@@ -23,6 +23,11 @@ add_library(atm SHARED ${SOURCES} ${HEADERS})
 # 链接库
 target_link_libraries(atm)
 
+# OpenTelemetry C++ (optional, requires opentelemetry-cpp)
+# Uncomment when OpenTelemetry C++ SDK is installed
+# find_package(opentelemetry-cpp REQUIRED)
+# target_link_libraries(atm PUBLIC opentelemetry::api opentelemetry::sdk)
+
 # 安装
 install(TARGETS atm
     LIBRARY DESTINATION lib
@@ -32,7 +37,9 @@ install(TARGETS atm
 
 install(DIRECTORY include/ DESTINATION include)
 
-# 测试
+# 测试 (optional)
 enable_testing()
-add_subdirectory(tests)
+if(EXISTS "${CMAKE_SOURCE_DIR}/tests/CMakeLists.txt")
+    add_subdirectory(tests)
+endif()
 

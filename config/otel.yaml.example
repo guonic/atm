@@ -1,0 +1,37 @@
+# OpenTelemetry Configuration Example
+# Copy this file to otel.yaml and customize as needed
+
+# Enable OpenTelemetry
+enabled: false
+
+# OpenTelemetry Collector endpoint
+# Format: host:port (e.g., localhost:4317)
+endpoint: "localhost:4317"
+
+# Service information
+service:
+  name: "atm"
+  version: "0.1.0"
+  environment: "development"  # development, staging, production
+
+# Feature flags
+features:
+  logs: true      # Enable log export
+  metrics: true   # Enable metrics export
+  traces: true    # Enable trace export
+
+# Sampling configuration
+sampling:
+  trace_ratio: 1.0  # 0.0 to 1.0, 1.0 = 100% sampling
+
+# Export intervals
+export:
+  metrics_interval: "5s"  # How often to export metrics
+
+# Resource attributes (added to all telemetry)
+resource:
+  attributes:
+    # Add custom attributes here
+    # deployment.environment: "production"
+    # team: "quant-trading"
+
