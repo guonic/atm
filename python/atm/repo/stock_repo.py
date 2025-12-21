@@ -130,6 +130,20 @@ class StockBasicRepo(DatabaseRepo):
             )
             return [StockBasic(**dict(row._mapping)) for row in result]
 
+    def get_all(self) -> List[StockBasic]:
+        """
+        Get all stocks.
+
+        Returns:
+            List of all StockBasic models.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        with engine.connect() as conn:
+            result = conn.execute(text(f'SELECT * FROM {table_name}'))
+            return [StockBasic(**dict(row._mapping)) for row in result]
+
 
 # =============================================
 # Stock Classify Repository

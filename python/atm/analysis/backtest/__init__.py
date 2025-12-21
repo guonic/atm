@@ -5,6 +5,7 @@ from atm.analysis.backtest.evaluator import BacktestEvaluator
 from atm.analysis.backtest.metrics import BacktestMetrics
 from atm.analysis.backtest.predictor_backtest import PredictorBacktester
 from atm.analysis.backtest.report import BacktestReport
+from atm.analysis.backtest.strategy_backtest import StrategyBacktester
 
 __all__ = [
     "BaseBacktester",
@@ -12,6 +13,7 @@ __all__ = [
     "BacktestEvaluator",
     "BacktestMetrics",
     "PredictorBacktester",
+    "StrategyBacktester",
     "BacktestReport",
 ]
 
