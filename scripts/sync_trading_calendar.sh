@@ -13,10 +13,8 @@ PYTHON_SCRIPT="$PROJECT_ROOT/python/tools/dataingestor/sync_trading_calendar.py"
 PYTHON_EXEC=""
 if [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
     PYTHON_EXEC="$PROJECT_ROOT/.venv/bin/python"
-elif [ -f "$PROJECT_ROOT/venv/bin/python" ]; then
-    PYTHON_EXEC="$PROJECT_ROOT/venv/bin/python"
 else
-    echo "错误: Python 虚拟环境未找到。请先运行 'make venv'。"
+    echo "错误: Python 虚拟环境未找到。请先运行 'python3 -m venv .venv'。"
     exit 1
 fi
 

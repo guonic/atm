@@ -30,12 +30,12 @@ Example:
 import argparse
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from huggingface_hub import constants
 
 from atm.ai.kronos import Kronos, KronosPredictor, KronosTokenizer
 from atm.config import load_config
@@ -376,8 +376,7 @@ def predict_future(
     
     # Check cache status
     try:
-        from huggingface_hub import HfFolder
-        cache_dir = HfFolder.get_cache_dir()
+        cache_dir = constants.default_cache_path
         logger.debug(f"HuggingFace cache directory: {cache_dir}")
         
         # Check if models are already cached
