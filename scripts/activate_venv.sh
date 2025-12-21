@@ -4,11 +4,11 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VENV_DIR="$PROJECT_ROOT/venv"
+VENV_DIR="$PROJECT_ROOT/.venv"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "错误: 虚拟环境不存在，请先创建："
-    echo "  python3 -m venv venv"
+    echo "  python3 -m venv .venv"
     exit 1
 fi
 

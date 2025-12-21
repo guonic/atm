@@ -28,11 +28,11 @@ cd atm
 2. **创建并激活 Python 虚拟环境**
 ```bash
 # 创建虚拟环境（如果还没有）
-python3 -m venv venv
+python3 -m venv .venv
 
 # 激活虚拟环境
 # macOS/Linux:
-source venv/bin/activate
+source .venv/bin/activate
 # Windows:
 # venv\Scripts\activate
 

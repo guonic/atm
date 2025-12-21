@@ -108,15 +108,15 @@ install: install-python install-go
 ## venv: 创建 Python 虚拟环境
 venv:
 	@echo "$(YELLOW)创建 Python 虚拟环境...$(NC)"
-	@python3 -m venv venv || echo "警告: 虚拟环境创建失败"
+	@python3 -m venv .venv || echo "警告: 虚拟环境创建失败"
 	@echo "$(GREEN)✓ 虚拟环境已创建$(NC)"
-	@echo "激活虚拟环境: source venv/bin/activate"
+	@echo "激活虚拟环境: source .venv/bin/activate"
 
 ## install-python: 安装 Python 依赖
 install-python:
 	@echo "$(YELLOW)安装 Python 依赖...$(NC)"
-	@if [ -d "venv" ]; then \
-		. venv/bin/activate && cd $(PYTHON_DIR) && pip install -e ".[dev]" || echo "警告: Python 依赖安装失败"; \
+	@if [ -d ".venv" ]; then \
+		. .venv/bin/activate && cd $(PYTHON_DIR) && pip install -e ".[dev]" || echo "警告: Python 依赖安装失败"; \
 	else \
 		echo "警告: 虚拟环境不存在，请先运行 'make venv'"; \
 	fi

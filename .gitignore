@@ -19,9 +19,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+# Virtual environments
 venv/
 env/
 ENV/
+.venv/
 .pytest_cache/
 .coverage
 htmlcov/

@@ -16,7 +16,7 @@
    - `Project: atm` → `Python Interpreter`
    - 点击齿轮图标 → `Add...`
    - 选择 `Existing environment`
-   - 解释器路径: `$PROJECT_DIR$/venv/bin/python`
+   - 解释器路径: `$PROJECT_DIR$/.venv/bin/python`
    - 点击 `OK`
 
 ### 步骤 2: 标记源代码根目录
@@ -67,7 +67,7 @@ atm/                          # Content Root
 │   │   └── repo/
 │   └── tools/               # 工具包
 │       └── dataingestor/
-└── venv/                    # 虚拟环境（已配置）
+└── .venv/                   # 虚拟环境（已配置）
 ```
 
 ### 环境变量配置（可选）
@@ -100,7 +100,7 @@ atm/                          # Content Root
 **检查项**：
 - ✅ 虚拟环境是否已激活？
 - ✅ `python` 目录是否标记为 `Sources Root`？
-- ✅ Python 解释器是否指向 `venv/bin/python`？
+- ✅ Python 解释器是否指向 `.venv/bin/python`？
 - ✅ 是否已安装所有依赖？运行: `pip install -e ".[dev]"`
 
 **解决方法**：
@@ -170,7 +170,7 @@ print("✓ All imports successful!")
     "python.analysis.extraPaths": [
         "${workspaceFolder}/python"
     ],
-    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python"
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
 }
 ```
 
