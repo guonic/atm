@@ -7,9 +7,11 @@ Synchronizes K-line data for all stocks, checking existing data and syncing from
 import logging
 import sys
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional, Type
+
+import pandas as pd
 
 # Ensure project path is in sys.path before importing atm modules
 _project_root = Path(__file__).parent.parent.parent.parent
@@ -52,6 +54,9 @@ from atm.repo import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Tushare API limits
+TUSHARE_MAX_RECORDS = 6000  # Maximum records per API request
 
 # Mapping from kline type to model and repo classes
 KLINE_TYPE_MAP = {
@@ -294,14 +299,8 @@ class KlineSyncService:
             time_column = self.kline_config["time_column"]
 
             # Parse time field based on kline type
-            if self.kline_type == "day":
-                trade_date_str = record.get("trade_date", "")
-                if not trade_date_str or trade_date_str == "00000000":
-                    return None
-                trade_date = datetime.strptime(trade_date_str, "%Y%m%d").date()
-                time_value = datetime.combine(trade_date, datetime.min.time())
-            elif self.kline_type in ["week", "month", "quarter"]:
-                # For weekly/monthly/quarterly, use the first day of the period
+            if self.kline_type in ["day", "week", "month", "quarter"]:
+                # For daily/weekly/monthly/quarterly, use trade_date
                 trade_date_str = record.get("trade_date", "")
                 if not trade_date_str or trade_date_str == "00000000":
                     return None
@@ -334,19 +333,60 @@ class KlineSyncService:
                 time_column: time_value,
             }
 
-            # Add price and volume fields
+            # Add price and volume fields (only if not None/NaN and valid)
+            # Helper function to safely convert to Decimal
+            def safe_decimal(value, field_name: str):
+                """Safely convert value to Decimal, handling None, NaN, and invalid values."""
+                if value is None:
+                    return None
+                # Check for pandas/numpy NaN
+                if pd.isna(value) if hasattr(pd, 'isna') else (isinstance(value, float) and value != value):
+                    return None
+                try:
+                    return Decimal(str(value))
+                except (ValueError, TypeError, InvalidOperation, Exception):
+                    logger.debug(f"Invalid {field_name} value: {value} for {ts_code}")
+                    return None
+            
+            # Helper function to safely convert to int
+            def safe_int(value, field_name: str):
+                """Safely convert value to int, handling None, NaN, and invalid values."""
+                if value is None:
+                    return None
+                # Check for pandas/numpy NaN
+                if pd.isna(value) if hasattr(pd, 'isna') else (isinstance(value, float) and value != value):
+                    return None
+                try:
+                    return int(float(value))
+                except (ValueError, TypeError, OverflowError, Exception):
+                    logger.debug(f"Invalid {field_name} value: {value} for {ts_code}")
+                    return None
+            
+            # Add fields only if conversion succeeds
             if "open" in record:
-                model_data["open"] = Decimal(str(record["open"]))
+                open_val = safe_decimal(record["open"], "open")
+                if open_val is not None:
+                    model_data["open"] = open_val
             if "high" in record:
-                model_data["high"] = Decimal(str(record["high"]))
+                high_val = safe_decimal(record["high"], "high")
+                if high_val is not None:
+                    model_data["high"] = high_val
             if "low" in record:
-                model_data["low"] = Decimal(str(record["low"]))
+                low_val = safe_decimal(record["low"], "low")
+                if low_val is not None:
+                    model_data["low"] = low_val
             if "close" in record:
-                model_data["close"] = Decimal(str(record["close"]))
+                close_val = safe_decimal(record["close"], "close")
+                if close_val is not None:
+                    model_data["close"] = close_val
             if "vol" in record:
-                model_data["volume"] = int(record["vol"])
+                vol_val = safe_int(record["vol"], "volume")
+                if vol_val is not None:
+                    model_data["volume"] = vol_val
             if "amount" in record:
-                model_data["amount"] = Decimal(str(record["amount"]))
+                amount_val = safe_decimal(record["amount"], "amount")
+                if amount_val is not None:
+                    model_data["amount"] = amount_val
 
             return model_class(**model_data)
         except Exception as e:
@@ -426,9 +466,11 @@ class KlineSyncService:
                 total_stocks = len(stocks)
                 logger.info(f"Found {total_stocks} stocks to sync")
 
+                # First pass: collect sync requirements
+                sync_queue = []
                 for idx, stock in enumerate(stocks, 1):
                     ts_code = stock.ts_code
-                    logger.info(f"[{idx}/{total_stocks}] Processing {ts_code} ({stock.full_name})...")
+                    logger.info(f"[{idx}/{total_stocks}] Analyzing {ts_code} ({stock.full_name})...")
 
                     try:
                         # Get last synced date
@@ -438,12 +480,10 @@ class KlineSyncService:
                         if last_synced_date:
                             # Start from the day after last synced date
                             start_date = (last_synced_date + timedelta(days=1)).strftime("%Y%m%d")
-                            logger.info(f"  Last synced date: {last_synced_date}, starting from: {start_date}")
                         else:
                             # Start from list_date
                             if stock.list_date:
                                 start_date = stock.list_date.strftime("%Y%m%d")
-                                logger.info(f"  No existing data, starting from list_date: {start_date}")
                             else:
                                 logger.warning(f"  Skipping {ts_code}: no list_date")
                                 continue
@@ -453,23 +493,27 @@ class KlineSyncService:
                             logger.info(f"  Skipping {ts_code}: start_date ({start_date}) > end_date ({end_date})")
                             continue
 
-                        # Sync K-line data for this stock
-                        stats = self._sync_stock_kline(
-                            ts_code=ts_code,
-                            start_date=start_date,
-                            end_date=end_date,
-                            batch_size=batch_size,
-                        )
-                        results[ts_code] = stats
-                        logger.info(
-                            f"  Completed {ts_code}: Fetched={stats['fetched']}, "
-                            f"Saved={stats['saved']}, Errors={stats['errors']}"
-                        )
-
+                        # Store sync info for batch processing
+                        sync_queue.append({
+                            "ts_code": ts_code,
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "last_synced_date": last_synced_date,
+                        })
                     except Exception as e:
-                        logger.error(f"  Failed to sync {ts_code}: {e}", exc_info=True)
+                        logger.error(f"  Failed to analyze {ts_code}: {e}", exc_info=True)
                         failed_stocks.append(ts_code)
                         results[ts_code] = {"fetched": 0, "saved": 0, "errors": 1}
+
+                # Second pass: batch sync by time range
+                if sync_queue:
+                    logger.info(f"Processing {len(sync_queue)} stocks with batch sync optimization...")
+                    batch_results = self._batch_sync_kline(
+                        sync_queue=sync_queue,
+                        batch_size=batch_size,
+                        max_batch_stocks=50,  # Maximum stocks per API call
+                    )
+                    results.update(batch_results)
 
                 # Final state update
                 state.status = "completed"
@@ -500,6 +544,101 @@ class KlineSyncService:
 
         return results
 
+    def _fetch_kline_records(
+        self,
+        ts_code: str,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict]:
+        """
+        Fetch K-line records from Tushare for a single stock.
+
+        Args:
+            ts_code: Stock code.
+            start_date: Start date (YYYYMMDD).
+            end_date: End date (YYYYMMDD).
+
+        Returns:
+            List of records.
+        """
+        if self.kline_type == "day":
+            return list(self.source.fetch_daily(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+            ))
+        else:
+            # For other frequencies, use pro_bar
+            if not self.source._initialized:
+                self.source._initialize()
+            records = list(self.source.fetch_pro_bar(
+                ts_code=ts_code,
+                freq=self.kline_config["tushare_freq"],
+                start_date=start_date,
+                end_date=end_date,
+            ))
+            # Add ts_code to each record for consistency
+            for record in records:
+                record["ts_code"] = ts_code
+            return records
+
+    def _process_and_save_records(
+        self,
+        ts_code: str,
+        records: List[Dict],
+        batch_size: int = 100,
+    ) -> Dict[str, int]:
+        """
+        Process records and save to database.
+
+        Args:
+            ts_code: Stock code.
+            records: List of records to process.
+            batch_size: Batch size for saving.
+
+        Returns:
+            Dictionary with statistics (fetched, saved, errors).
+        """
+        stats = {"fetched": 0, "saved": 0, "errors": 0}
+        batch = []
+
+        for record in records:
+            stats["fetched"] += 1
+
+            try:
+                # Convert to model
+                kline = self._convert_to_kline_model(record)
+                if kline:
+                    batch.append(kline)
+
+                    # Save batch when it reaches batch_size
+                    if len(batch) >= batch_size:
+                        try:
+                            saved = self.kline_repo.save_batch_models(batch)
+                            stats["saved"] += saved
+                            batch = []
+                        except Exception as e:
+                            stats["errors"] += len(batch)
+                            logger.error(f"Error saving batch for {ts_code}: {e}", exc_info=True)
+                            batch = []
+                else:
+                    stats["errors"] += 1
+
+            except Exception as e:
+                stats["errors"] += 1
+                logger.error(f"Error converting record for {ts_code}: {e}", exc_info=True)
+
+        # Save remaining records
+        if batch:
+            try:
+                saved = self.kline_repo.save_batch_models(batch)
+                stats["saved"] += saved
+            except Exception as e:
+                stats["errors"] += len(batch)
+                logger.error(f"Error saving final batch for {ts_code}: {e}", exc_info=True)
+
+        return stats
+
     def _sync_stock_kline(
         self,
         ts_code: str,
@@ -519,67 +658,267 @@ class KlineSyncService:
         Returns:
             Dictionary with ingestion statistics.
         """
-        stats = {"fetched": 0, "saved": 0, "errors": 0}
-        batch = []
-
         try:
-            # Fetch K-line data from Tushare
-            if self.kline_type == "day":
-                records = self.source.fetch_daily(
-                    ts_code=ts_code,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            else:
-                # For other frequencies, use pro_bar
-                # Note: pro_bar requires pro_api to be initialized
-                if not self.source._initialized:
-                    self.source._initialize()
-                records = self.source.fetch_pro_bar(
-                    ts_code=ts_code,
-                    freq=self.kline_config["tushare_freq"],
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-
-            for record in records:
-                stats["fetched"] += 1
-
-                try:
-                    # Convert to model
-                    kline = self._convert_to_kline_model(record)
-                    if kline:
-                        batch.append(kline)
-
-                        # Save batch when it reaches batch_size
-                        if len(batch) >= batch_size:
-                            try:
-                                saved = self.kline_repo.save_batch_models(batch)
-                                stats["saved"] += saved
-                                batch = []
-                            except Exception as e:
-                                stats["errors"] += len(batch)
-                                logger.error(f"Error saving batch for {ts_code}: {e}", exc_info=True)
-                                batch = []
-                    else:
-                        stats["errors"] += 1
-
-                except Exception as e:
-                    stats["errors"] += 1
-                    logger.error(f"Error converting record for {ts_code}: {e}", exc_info=True)
-
-            # Save remaining records
-            if batch:
-                try:
-                    saved = self.kline_repo.save_batch_models(batch)
-                    stats["saved"] += saved
-                except Exception as e:
-                    stats["errors"] += len(batch)
-                    logger.error(f"Error saving final batch for {ts_code}: {e}", exc_info=True)
-
+            records = self._fetch_kline_records(ts_code, start_date, end_date)
+            return self._process_and_save_records(ts_code, records, batch_size)
         except Exception as e:
             logger.error(f"Error syncing K-line for {ts_code}: {e}", exc_info=True)
-            stats["errors"] += 1
+            return {"fetched": 0, "saved": 0, "errors": 1}
 
-        return stats
+    def _batch_sync_kline(
+        self,
+        sync_queue: List[Dict],
+        batch_size: int = 100,
+        max_batch_stocks: int = 50,
+    ) -> Dict[str, Dict[str, int]]:
+        """
+        Batch sync K-line data for multiple stocks.
+
+        Groups stocks by time range and uses batch API calls when possible.
+
+        Args:
+            sync_queue: List of sync requirements, each with ts_code, start_date, end_date.
+            batch_size: Batch size for saving to database.
+            max_batch_stocks: Maximum number of stocks per API call.
+
+        Returns:
+            Dictionary mapping ts_code to statistics.
+        """
+        results = {}
+
+        # Group stocks by time range (start_date, end_date)
+        time_range_groups = {}
+        for item in sync_queue:
+            time_key = (item["start_date"], item["end_date"])
+            if time_key not in time_range_groups:
+                time_range_groups[time_key] = []
+            time_range_groups[time_key].append(item)
+
+        logger.info(f"Grouped {len(sync_queue)} stocks into {len(time_range_groups)} time range groups")
+
+        # Process each time range group
+        for (start_date, end_date), group_items in time_range_groups.items():
+            logger.info(
+                f"Processing time range {start_date} to {end_date} with {len(group_items)} stocks"
+            )
+
+            # For all K-line types, use batch API if multiple stocks
+            if len(group_items) > 1:
+                # Use batch API call for multiple stocks
+                ts_codes = [item["ts_code"] for item in group_items]
+                
+                # Estimate data volume and split if exceeds Tushare limit
+                estimated_records = self._estimate_data_volume(
+                    ts_codes=ts_codes,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                
+                if estimated_records > TUSHARE_MAX_RECORDS:
+                    # Need to split by stocks or time range
+                    logger.info(
+                        f"  Estimated {estimated_records} records exceeds Tushare limit ({TUSHARE_MAX_RECORDS}), "
+                        f"splitting into smaller batches"
+                    )
+                    
+                    # Calculate max stocks per batch based on estimated records per stock
+                    records_per_stock = estimated_records / len(ts_codes) if ts_codes else 0
+                    if records_per_stock > 0:
+                        max_stocks_per_batch = max(1, int(TUSHARE_MAX_RECORDS / records_per_stock))
+                    else:
+                        max_stocks_per_batch = max_batch_stocks
+                    
+                    # Split stocks into batches
+                    for i in range(0, len(ts_codes), max_stocks_per_batch):
+                        batch_ts_codes = ts_codes[i:i + max_stocks_per_batch]
+                        batch_items = group_items[i:i + max_stocks_per_batch]
+                        
+                        logger.info(
+                            f"  Batch API call for {len(batch_ts_codes)} stocks ({self.kline_type}): "
+                            f"{batch_ts_codes[0]} ... {batch_ts_codes[-1]}"
+                        )
+                        
+                        batch_results = self._batch_sync_kline_by_type(
+                            ts_codes=batch_ts_codes,
+                            start_date=start_date,
+                            end_date=end_date,
+                            batch_size=batch_size,
+                        )
+                        results.update(batch_results)
+                else:
+                    # Can process all stocks in one batch
+                    logger.info(
+                        f"  Batch API call for {len(ts_codes)} stocks ({self.kline_type}): "
+                        f"{ts_codes[0]} ... {ts_codes[-1]}"
+                    )
+                    
+                    batch_results = self._batch_sync_kline_by_type(
+                        ts_codes=ts_codes,
+                        start_date=start_date,
+                        end_date=end_date,
+                        batch_size=batch_size,
+                    )
+                    results.update(batch_results)
+            else:
+                # Process individually (single stock)
+                for item in group_items:
+                    stats = self._sync_stock_kline(
+                        ts_code=item["ts_code"],
+                        start_date=item["start_date"],
+                        end_date=item["end_date"],
+                        batch_size=batch_size,
+                    )
+                    results[item["ts_code"]] = stats
+
+        return results
+
+    def _estimate_data_volume(
+        self,
+        ts_codes: List[str],
+        start_date: str,
+        end_date: str,
+    ) -> int:
+        """
+        Estimate data volume for a batch request.
+
+        Args:
+            ts_codes: List of stock codes.
+            start_date: Start date (YYYYMMDD).
+            end_date: End date (YYYYMMDD).
+
+        Returns:
+            Estimated number of records.
+        """
+        try:
+            start_dt = datetime.strptime(start_date, "%Y%m%d")
+            end_dt = datetime.strptime(end_date, "%Y%m%d")
+            days = (end_dt - start_dt).days + 1
+            
+            # Estimate records per stock based on kline type
+            # Trading days ratio: approximately 70% of calendar days
+            trading_days_ratio = 0.7
+            
+            records_per_stock_map = {
+                "day": days * trading_days_ratio,  # ~1 record per trading day
+                "week": days / 7,  # ~1 record per week
+                "month": days / 30,  # ~1 record per month
+                "quarter": days / 90,  # ~1 record per quarter
+                "hour": days * trading_days_ratio * 4,  # ~4 records per trading day
+                "30min": days * trading_days_ratio * 8,  # ~8 records per trading day
+                "15min": days * trading_days_ratio * 16,  # ~16 records per trading day
+                "5min": days * trading_days_ratio * 48,  # ~48 records per trading day
+                "1min": days * trading_days_ratio * 240,  # ~240 records per trading day
+            }
+            
+            records_per_stock = records_per_stock_map.get(self.kline_type, days)
+            
+            total_records = int(records_per_stock * len(ts_codes))
+            return total_records
+        except Exception as e:
+            logger.warning(f"Failed to estimate data volume: {e}, using conservative estimate")
+            # Conservative estimate: assume 1 record per day per stock
+            return len(ts_codes) * 365
+
+    def _batch_sync_kline_by_type(
+        self,
+        ts_codes: List[str],
+        start_date: str,
+        end_date: str,
+        batch_size: int = 100,
+    ) -> Dict[str, Dict[str, int]]:
+        """
+        Batch sync K-line data for multiple stocks using single API call.
+        Supports all K-line types (day, week, month, quarter, hour, minutes).
+
+        Args:
+            ts_codes: List of stock codes.
+            start_date: Start date (YYYYMMDD).
+            end_date: End date (YYYYMMDD).
+            batch_size: Batch size for saving to database.
+
+        Returns:
+            Dictionary mapping ts_code to statistics.
+        """
+        results = {ts_code: {"fetched": 0, "saved": 0, "errors": 0} for ts_code in ts_codes}
+        
+        try:
+            logger.info(
+                f"  Fetching {self.kline_type} K-line for {len(ts_codes)} stocks "
+                f"({start_date} to {end_date})"
+            )
+            
+            # Fetch all stocks' data based on kline type
+            all_records = []
+            
+            if self.kline_type in ["day", "week", "month"]:
+                # Use batch API with comma-separated ts_code
+                ts_codes_str = ",".join(ts_codes)
+                
+                if self.kline_type == "day":
+                    all_records = list(self.source.fetch_daily(
+                        ts_code=ts_codes_str,
+                        start_date=start_date,
+                        end_date=end_date,
+                    ))
+                else:
+                    # week or month - use generic fetch with api_name
+                    api_name = KLINE_TYPE_MAP[self.kline_type]["tushare_api"]
+                    all_records = list(self.source.fetch(
+                        api_name=api_name,
+                        ts_code=ts_codes_str,
+                        start_date=start_date,
+                        end_date=end_date,
+                    ))
+            else:
+                # For other types (quarter, hour, minutes), use pro_bar
+                # Note: pro_bar doesn't support batch ts_code, so we need to loop
+                for ts_code in ts_codes:
+                    try:
+                        records = self._fetch_kline_records(ts_code, start_date, end_date)
+                        all_records.extend(records)
+                    except Exception as e:
+                        logger.error(f"Error fetching {self.kline_type} data for {ts_code}: {e}")
+                        results[ts_code]["errors"] += 1
+            
+            logger.info(f"  Fetched {len(all_records)} records from API")
+            
+            # Check if exceeds Tushare limit (should not happen if estimation is correct)
+            if len(all_records) > TUSHARE_MAX_RECORDS:
+                logger.warning(
+                    f"  WARNING: Fetched {len(all_records)} records exceeds Tushare limit ({TUSHARE_MAX_RECORDS}). "
+                    f"Some data may be missing. Consider splitting the request."
+                )
+            
+            # Group records by ts_code
+            records_by_stock = {}
+            for record in all_records:
+                ts_code = record.get("ts_code", "").strip()
+                if ts_code and ts_code in ts_codes:
+                    if ts_code not in records_by_stock:
+                        records_by_stock[ts_code] = []
+                    records_by_stock[ts_code].append(record)
+                    results[ts_code]["fetched"] += 1
+            
+            # Process and save each stock's data
+            for ts_code, stock_records in records_by_stock.items():
+                stock_stats = self._process_and_save_records(ts_code, stock_records, batch_size)
+                results[ts_code].update(stock_stats)
+                
+                logger.info(
+                    f"  Completed {ts_code}: Fetched={results[ts_code]['fetched']}, "
+                    f"Saved={results[ts_code]['saved']}, Errors={results[ts_code]['errors']}"
+                )
+            
+            # Handle stocks with no data
+            for ts_code in ts_codes:
+                if ts_code not in records_by_stock:
+                    logger.warning(f"  No data returned for {ts_code}")
+                    
+        except Exception as e:
+            logger.error(f"Error in batch sync: {e}", exc_info=True)
+            # Mark all stocks as having errors
+            for ts_code in ts_codes:
+                results[ts_code]["errors"] += 1
+        
+        return results
 
