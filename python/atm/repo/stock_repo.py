@@ -16,6 +16,7 @@ from atm.models.stock import (
     StockClassify,
     StockFinanceBasic,
     StockKlineSyncState,
+    StockPremarket,
     StockQuoteSnapshot,
     StockTradeRule,
 )
@@ -380,6 +381,117 @@ class StockFinanceBasicRepo(DatabaseRepo):
         with engine.connect() as conn:
             result = conn.execute(text(query), {"ts_code": ts_code})
             return [StockFinanceBasic(**dict(row._mapping)) for row in result]
+
+
+# =============================================
+# Stock Premarket Repository
+# =============================================
+
+
+class StockPremarketRepo(DatabaseRepo):
+    """Repository for stock premarket information."""
+
+    def __init__(self, config: DatabaseConfig, schema: str = "quant"):
+        """Initialize stock premarket repository."""
+        super().__init__(
+            config=config,
+            table_name="stock_premarket",
+            schema=schema,
+            on_conflict="update",
+        )
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        """Ensure premarket table exists."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            trade_date DATE NOT NULL,
+            ts_code VARCHAR(20) NOT NULL,
+            total_share DECIMAL(20, 4),
+            float_share DECIMAL(20, 4),
+            pre_close DECIMAL(10, 2),
+            up_limit DECIMAL(10, 2),
+            down_limit DECIMAL(10, 2),
+            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (trade_date, ts_code)
+        );
+        """
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(create_table_sql))
+            logger.info(f"Ensured table {table_name} exists.")
+        except Exception as e:
+            logger.warning(f"Failed to create premarket table {table_name} (may already exist): {e}")
+            if not self.table_exists():
+                raise RepoError(f"Table {table_name} does not exist and could not be created.") from e
+
+        # Create indexes
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{self.table_name}_ts_code ON {table_name}(ts_code);'))
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{self.table_name}_trade_date ON {table_name}(trade_date);'))
+            logger.info(f"Ensured indexes for table {table_name} exist.")
+        except Exception as e:
+            logger.warning(f"Failed to create indexes for table {table_name}: {e}")
+
+    def save_model(self, premarket: StockPremarket) -> bool:
+        """Save a StockPremarket model."""
+        data = premarket.model_dump(exclude_none=True)
+        if "trade_date" in data and isinstance(data["trade_date"], date):
+            data["trade_date"] = data["trade_date"].isoformat()
+        if "update_time" in data and isinstance(data["update_time"], datetime):
+            data["update_time"] = data["update_time"].isoformat()
+        return self.save(data)
+
+    def save_batch_models(self, premarkets: List[StockPremarket]) -> int:
+        """Save multiple StockPremarket models."""
+        data_list = []
+        for premarket in premarkets:
+            data = premarket.model_dump(exclude_none=True)
+            if "trade_date" in data and isinstance(data["trade_date"], date):
+                data["trade_date"] = data["trade_date"].isoformat()
+            if "update_time" in data and isinstance(data["update_time"], datetime):
+                data["update_time"] = data["update_time"].isoformat()
+            data_list.append(data)
+        return self.save_batch(data_list)
+
+    def get_by_ts_code(
+        self, ts_code: str, start_date: Optional[date] = None, end_date: Optional[date] = None
+    ) -> List[StockPremarket]:
+        """Get premarket data by ts_code."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        conditions = ["ts_code = :ts_code"]
+        params = {"ts_code": ts_code}
+
+        if start_date:
+            conditions.append("trade_date >= :start_date")
+            params["start_date"] = start_date.isoformat()
+        if end_date:
+            conditions.append("trade_date <= :end_date")
+            params["end_date"] = end_date.isoformat()
+
+        query = f'SELECT * FROM {table_name} WHERE {" AND ".join(conditions)} ORDER BY trade_date DESC'
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params)
+            return [StockPremarket(**dict(row._mapping)) for row in result]
+
+    def get_by_trade_date(self, trade_date: date) -> List[StockPremarket]:
+        """Get premarket data by trade_date."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(f'SELECT * FROM {table_name} WHERE trade_date = :trade_date'),
+                {"trade_date": trade_date.isoformat()},
+            )
+            return [StockPremarket(**dict(row._mapping)) for row in result]
 
 
 # =============================================
