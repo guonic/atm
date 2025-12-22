@@ -245,6 +245,7 @@ class BatchStrategyEvaluator:
         end_date: datetime,
         strategy_params: Optional[Dict] = None,
         add_analyzers: bool = True,
+        kline_type: str = "day",
     ) -> List[BacktestResult]:
         """
         Evaluate strategy on multiple stocks.
@@ -276,6 +277,7 @@ class BatchStrategyEvaluator:
                     strategy_class=strategy_class,
                     strategy_params=strategy_params,
                     add_analyzers=add_analyzers,
+                    kline_type=kline_type,
                 )
                 results.append(result)
 

@@ -81,6 +81,9 @@ class StrategyBacktester(BaseBacktester):
         )
 
         try:
+            # Extract kline_type from kwargs or use default
+            kline_type = kwargs.get("kline_type", "day")
+
             # Run strategy using StrategyRunner
             runner = StrategyRunner.run_strategy(
                 db_config=self.db_config,
@@ -94,6 +97,7 @@ class StrategyBacktester(BaseBacktester):
                 schema=self.schema,
                 strategy_params=strategy_params,
                 add_analyzers=add_analyzers,
+                kline_type=kline_type,
             )
 
             # Get basic results
