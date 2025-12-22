@@ -4,6 +4,7 @@ Stock information repositories.
 Provides repository implementations for stock-related models.
 """
 
+import logging
 from datetime import date, datetime
 from typing import List, Optional
 
@@ -14,11 +15,14 @@ from atm.models.stock import (
     StockBasic,
     StockClassify,
     StockFinanceBasic,
+    StockKlineSyncState,
     StockQuoteSnapshot,
     StockTradeRule,
 )
 from atm.repo.base import RepoError
 from atm.repo.database_repo import DatabaseRepo
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================
@@ -110,12 +114,16 @@ class StockBasicRepo(DatabaseRepo):
                 return StockBasic(**dict(row._mapping))
         return None
 
-    def get_by_exchange(self, exchange: str) -> List[StockBasic]:
+    def get_by_exchange(
+        self, exchange: Optional[str] = None, list_status: Optional[str] = None
+    ) -> List[StockBasic]:
         """
-        Get stocks by exchange.
+        Get stocks by exchange and list status.
 
         Args:
-            exchange: Exchange code (SH/SE/SZ).
+            exchange: Exchange code (SH/SE/SZ). If None or empty, returns all exchanges.
+            list_status: List status (L=listed, D=delisted, P=pause, empty for all).
+                Maps to is_listed field: L=True, D=False, P=False.
 
         Returns:
             List of StockBasic models.
@@ -123,11 +131,32 @@ class StockBasicRepo(DatabaseRepo):
         engine = self._get_engine()
         table_name = self._get_full_table_name()
 
+        conditions = []
+        params = {}
+
+        if exchange:
+            conditions.append("exchange = :exchange")
+            params["exchange"] = exchange
+
+        if list_status:
+            if list_status == "L":
+                conditions.append("is_listed = :is_listed")
+                params["is_listed"] = True
+            elif list_status == "D":
+                conditions.append("is_listed = :is_listed")
+                params["is_listed"] = False
+            # For "P" (pause), we might need additional logic if there's a pause field
+            # For now, we'll treat it as delisted (is_listed=False)
+            elif list_status == "P":
+                conditions.append("is_listed = :is_listed")
+                params["is_listed"] = False
+
+        query = f'SELECT * FROM {table_name}'
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+
         with engine.connect() as conn:
-            result = conn.execute(
-                text(f'SELECT * FROM {table_name} WHERE exchange = :exchange'),
-                {"exchange": exchange},
-            )
+            result = conn.execute(text(query), params)
             return [StockBasic(**dict(row._mapping)) for row in result]
 
     def get_all(self) -> List[StockBasic]:
@@ -376,5 +405,99 @@ class StockQuoteSnapshotRepo(DatabaseRepo):
         with engine.connect() as conn:
             result = conn.execute(text(query), {"limit": limit})
             return [StockQuoteSnapshot(**dict(row._mapping)) for row in result]
+
+
+# =============================================
+# Stock K-line Sync State Repository
+# =============================================
+
+
+class StockKlineSyncStateRepo(DatabaseRepo):
+    """Repository for stock K-line synchronization state."""
+
+    def __init__(self, config: DatabaseConfig, schema: str = "quant"):
+        """Initialize stock K-line sync state repository."""
+        super().__init__(
+            config=config,
+            table_name="stock_kline_sync_state",
+            schema=schema,
+            on_conflict="update",
+        )
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        """Ensure sync state table exists."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            ts_code VARCHAR(20) NOT NULL,
+            kline_type VARCHAR(20) NOT NULL,
+            last_synced_date DATE,
+            last_synced_time TIMESTAMP,
+            total_records INTEGER DEFAULT 0,
+            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ts_code, kline_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_{table_name}_ts_code ON {table_name}(ts_code);
+        CREATE INDEX IF NOT EXISTS idx_{table_name}_kline_type ON {table_name}(kline_type);
+        """
+
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(create_table_sql))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to create sync state table (may already exist): {e}")
+
+    def save_model(self, state: StockKlineSyncState) -> bool:
+        """
+        Save or update sync state.
+
+        Args:
+            state: StockKlineSyncState model instance.
+
+        Returns:
+            True if save was successful.
+        """
+        data = state.model_dump(exclude_none=True)
+        # Convert date/datetime to string
+        if "last_synced_date" in data and isinstance(data["last_synced_date"], date):
+            data["last_synced_date"] = data["last_synced_date"].isoformat()
+        if "last_synced_time" in data and isinstance(data["last_synced_time"], datetime):
+            data["last_synced_time"] = data["last_synced_time"].isoformat()
+        if "update_time" in data and isinstance(data["update_time"], datetime):
+            data["update_time"] = data["update_time"].isoformat()
+
+        return self.save(data)
+
+    def get_by_ts_code_and_type(
+        self, ts_code: str, kline_type: str
+    ) -> Optional[StockKlineSyncState]:
+        """
+        Get sync state by ts_code and kline_type.
+
+        Args:
+            ts_code: Stock code.
+            kline_type: K-line type.
+
+        Returns:
+            StockKlineSyncState if found, None otherwise.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    f'SELECT * FROM {table_name} WHERE ts_code = :ts_code AND kline_type = :kline_type'
+                ),
+                {"ts_code": ts_code, "kline_type": kline_type},
+            )
+            row = result.fetchone()
+            if row:
+                return StockKlineSyncState(**dict(row._mapping))
+        return None
 
 

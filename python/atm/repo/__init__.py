@@ -29,6 +29,7 @@ from atm.repo.stock_repo import (
     StockBasicRepo,
     StockClassifyRepo,
     StockFinanceBasicRepo,
+    StockKlineSyncStateRepo,
     StockQuoteSnapshotRepo,
     StockTradeRuleRepo,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "StockTradeRuleRepo",
     "StockFinanceBasicRepo",
     "StockQuoteSnapshotRepo",
+    "StockKlineSyncStateRepo",
     # K-line repositories
     "StockKlineQuarterRepo",
     "StockKlineMonthRepo",

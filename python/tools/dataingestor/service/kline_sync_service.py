@@ -9,7 +9,7 @@ import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -31,7 +31,7 @@ from atm.models.kline import (
     StockKlineQuarter,
     StockKlineWeek,
 )
-from atm.models.stock import StockBasic
+from atm.models.stock import StockKlineSyncState
 from atm.repo import (
     BaseStateRepo,
     BaseTaskLock,
@@ -49,6 +49,7 @@ from atm.repo import (
     StockKlineHourRepo,
     StockKlineMonthRepo,
     StockKlineQuarterRepo,
+    StockKlineSyncStateRepo,
     StockKlineWeekRepo,
     TaskLockError,
 )
@@ -166,6 +167,7 @@ class KlineSyncService:
         self._source: Optional[TushareSource] = None
         self._stock_repo: Optional[StockBasicRepo] = None
         self._kline_repo = None
+        self._sync_state_repo: Optional[StockKlineSyncStateRepo] = None
         self._state_repo: Optional[BaseStateRepo] = state_repo
         self._state_dir = state_dir or "storage/state"
         self._task_lock: Optional[BaseTaskLock] = task_lock
@@ -182,6 +184,8 @@ class KlineSyncService:
             self._stock_repo.close()
         if self._kline_repo:
             self._kline_repo.close()
+        if self._sync_state_repo:
+            self._sync_state_repo.close()
 
     @property
     def source(self) -> TushareSource:
@@ -210,6 +214,13 @@ class KlineSyncService:
             # Use append mode to avoid overwriting historical data
             self._kline_repo.on_conflict = "ignore"
         return self._kline_repo
+
+    @property
+    def sync_state_repo(self) -> StockKlineSyncStateRepo:
+        """Get or create sync state repository."""
+        if self._sync_state_repo is None:
+            self._sync_state_repo = StockKlineSyncStateRepo(self.db_config)
+        return self._sync_state_repo
 
     @property
     def state_repo(self) -> BaseStateRepo:
@@ -244,7 +255,7 @@ class KlineSyncService:
 
     def _get_last_synced_date(self, ts_code: str) -> Optional[date]:
         """
-        Get the last synced date for a stock.
+        Get the last synced date for a stock from sync state table.
 
         Args:
             ts_code: Stock code.
@@ -253,36 +264,38 @@ class KlineSyncService:
             Last synced date if exists, None otherwise.
         """
         try:
-            # Get the latest K-line record for this stock
-            # Note: get_by_ts_code returns a list of model instances (not dicts)
-            existing_data = self.kline_repo.get_by_ts_code(ts_code=ts_code, limit=1)
-            if existing_data:
-                time_column = self.kline_config["time_column"]
-                last_record = existing_data[0]
-                
-                # Get time value from record (it's a model instance, not a dict)
-                last_time = getattr(last_record, time_column, None)
-
-                if last_time:
-                    # Parse time value if it's a string
-                    if isinstance(last_time, str):
-                        try:
-                            last_time = datetime.fromisoformat(last_time.replace("Z", "+00:00"))
-                        except ValueError:
-                            try:
-                                last_time = datetime.strptime(last_time, "%Y-%m-%d")
-                            except ValueError:
-                                logger.warning(f"Failed to parse last_time: {last_time}")
-                                return None
-
-                    # For datetime fields, return the date
-                    if isinstance(last_time, datetime):
-                        return last_time.date()
-                    elif isinstance(last_time, date):
-                        return last_time
+            sync_state = self.sync_state_repo.get_by_ts_code_and_type(
+                ts_code=ts_code, kline_type=self.kline_type
+            )
+            if sync_state and sync_state.last_synced_date:
+                return sync_state.last_synced_date
         except Exception as e:
             logger.warning(f"Failed to get last synced date for {ts_code}: {e}")
         return None
+
+    def _update_sync_state(
+        self, ts_code: str, last_synced_date: date, total_records: int = 0
+    ) -> None:
+        """
+        Update sync state for a stock.
+
+        Args:
+            ts_code: Stock code.
+            last_synced_date: Last synced date.
+            total_records: Total records synced (optional, for tracking).
+        """
+        try:
+            sync_state = StockKlineSyncState(
+                ts_code=ts_code,
+                kline_type=self.kline_type,
+                last_synced_date=last_synced_date,
+                last_synced_time=datetime.now(),
+                total_records=total_records,
+                update_time=datetime.now(),
+            )
+            self.sync_state_repo.save_model(sync_state)
+        except Exception as e:
+            logger.warning(f"Failed to update sync state for {ts_code}: {e}")
 
     def _convert_to_kline_model(self, record: Dict) -> Optional:
         """
@@ -441,27 +454,9 @@ class KlineSyncService:
                 if not self.source.test_connection():
                     raise ConnectionError("Tushare connection test failed")
 
-                # Get all stocks
-                logger.info(f"Fetching stocks: exchange={exchange or 'ALL'}, list_status={list_status or 'ALL'}")
-                if exchange:
-                    stocks = self.stock_repo.get_by_exchange(exchange)
-                else:
-                    # Get all stocks by fetching from Tushare
-                    stocks = []
-                    for record in self.source.fetch_stock_basic(exchange="", list_status=list_status):
-                        try:
-                            stock = StockBasic(
-                                ts_code=record.get("ts_code", ""),
-                                symbol=record.get("symbol", ""),
-                                full_name=record.get("name", ""),
-                                exchange=record.get("exchange", ""),
-                                market=record.get("market", ""),
-                                list_date=datetime.strptime(record["list_date"], "%Y%m%d").date() if record.get("list_date") else None,
-                            )
-                            stocks.append(stock)
-                        except Exception as e:
-                            logger.warning(f"Failed to convert stock record: {e}")
-                            continue
+                # Get all stocks from database
+                logger.info(f"Fetching stocks from database: exchange={exchange or 'ALL'}, list_status={list_status or 'ALL'}")
+                stocks = self.stock_repo.get_by_exchange(exchange=exchange, list_status=list_status)
 
                 total_stocks = len(stocks)
                 logger.info(f"Found {total_stocks} stocks to sync")
@@ -587,6 +582,7 @@ class KlineSyncService:
         ts_code: str,
         records: List[Dict],
         batch_size: int = 100,
+        end_date: Optional[str] = None,
     ) -> Dict[str, int]:
         """
         Process records and save to database.
@@ -595,12 +591,14 @@ class KlineSyncService:
             ts_code: Stock code.
             records: List of records to process.
             batch_size: Batch size for saving.
+            end_date: End date (YYYYMMDD) for updating sync state.
 
         Returns:
             Dictionary with statistics (fetched, saved, errors).
         """
         stats = {"fetched": 0, "saved": 0, "errors": 0}
         batch = []
+        last_synced_date = None
 
         for record in records:
             stats["fetched"] += 1
@@ -610,6 +608,23 @@ class KlineSyncService:
                 kline = self._convert_to_kline_model(record)
                 if kline:
                     batch.append(kline)
+                    
+                    # Track last synced date from records
+                    time_column = self.kline_config["time_column"]
+                    record_time = getattr(kline, time_column, None)
+                    if record_time:
+                        if isinstance(record_time, datetime):
+                            record_date = record_time.date()
+                        elif isinstance(record_time, date):
+                            record_date = record_time
+                        else:
+                            try:
+                                record_date = datetime.strptime(str(record_time), "%Y-%m-%d").date()
+                            except:
+                                record_date = None
+                        
+                        if record_date and (last_synced_date is None or record_date > last_synced_date):
+                            last_synced_date = record_date
 
                     # Save batch when it reaches batch_size
                     if len(batch) >= batch_size:
@@ -637,6 +652,17 @@ class KlineSyncService:
                 stats["errors"] += len(batch)
                 logger.error(f"Error saving final batch for {ts_code}: {e}", exc_info=True)
 
+        # Update sync state if records were saved
+        if stats["saved"] > 0 and last_synced_date:
+            self._update_sync_state(ts_code, last_synced_date, stats["saved"])
+        elif stats["saved"] > 0 and end_date:
+            # Fallback to end_date if we couldn't extract from records
+            try:
+                last_synced_date = datetime.strptime(end_date, "%Y%m%d").date()
+                self._update_sync_state(ts_code, last_synced_date, stats["saved"])
+            except Exception as e:
+                logger.warning(f"Failed to parse end_date for sync state update: {e}")
+
         return stats
 
     def _sync_stock_kline(
@@ -660,7 +686,7 @@ class KlineSyncService:
         """
         try:
             records = self._fetch_kline_records(ts_code, start_date, end_date)
-            return self._process_and_save_records(ts_code, records, batch_size)
+            return self._process_and_save_records(ts_code, records, batch_size, end_date=end_date)
         except Exception as e:
             logger.error(f"Error syncing K-line for {ts_code}: {e}", exc_info=True)
             return {"fetched": 0, "saved": 0, "errors": 1}
@@ -901,7 +927,9 @@ class KlineSyncService:
             
             # Process and save each stock's data
             for ts_code, stock_records in records_by_stock.items():
-                stock_stats = self._process_and_save_records(ts_code, stock_records, batch_size)
+                stock_stats = self._process_and_save_records(
+                    ts_code, stock_records, batch_size, end_date=end_date
+                )
                 results[ts_code].update(stock_stats)
                 
                 logger.info(
