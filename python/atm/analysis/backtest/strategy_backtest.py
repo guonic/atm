@@ -100,11 +100,63 @@ class StrategyBacktester(BaseBacktester):
             basic_results = runner.get_results()
             analyzer_results = runner.get_analyzer_results() if add_analyzers else {}
 
-            # Combine all metrics
+            # Extract metrics from analyzer results
+            # BacktestResult.metrics expects Dict[str, Any], so we can include nested structures
+            # but we'll also extract key numeric values for easier access
+            # All float values are rounded to 2 decimal places
+            
+            def round_float(value, decimals: int = 2):
+                """Round float value to specified decimal places."""
+                if value is None:
+                    return None
+                try:
+                    return round(float(value), decimals)
+                except (ValueError, TypeError):
+                    return value
+            
             all_metrics = {
-                **basic_results,
-                **analyzer_results,
+                "initial_value": round_float(basic_results.get("initial_value")),
+                "final_value": round_float(basic_results.get("final_value")),
+                "total_return": round_float(basic_results.get("total_return")),
             }
+            
+            # Add analyzer results as nested structures
+            if analyzer_results:
+                all_metrics["analyzer_results"] = analyzer_results
+                
+                # Extract key numeric metrics for easy access (rounded to 2 decimals)
+                if "trades" in analyzer_results:
+                    trades = analyzer_results["trades"]
+                    if isinstance(trades, dict):
+                        if "total" in trades and "total" in trades["total"]:
+                            all_metrics["total_trades"] = round_float(trades["total"]["total"], decimals=0)
+                        if "won" in trades and "total" in trades["won"]:
+                            all_metrics["won_trades"] = round_float(trades["won"]["total"], decimals=0)
+                        if "lost" in trades and "total" in trades["lost"]:
+                            all_metrics["lost_trades"] = round_float(trades["lost"]["total"], decimals=0)
+                
+                if "sharpe" in analyzer_results:
+                    sharpe = analyzer_results["sharpe"]
+                    if isinstance(sharpe, dict) and "sharperatio" in sharpe:
+                        all_metrics["sharpe_ratio"] = round_float(sharpe["sharperatio"], decimals=2) if sharpe["sharperatio"] is not None else None
+                
+                if "drawdown" in analyzer_results:
+                    dd = analyzer_results["drawdown"]
+                    if isinstance(dd, dict) and "max" in dd:
+                        max_dd = dd["max"]
+                        if isinstance(max_dd, dict):
+                            if "drawdown" in max_dd:
+                                all_metrics["max_drawdown"] = round_float(max_dd["drawdown"], decimals=2) if max_dd["drawdown"] is not None else None
+                            if "len" in max_dd:
+                                all_metrics["max_drawdown_len"] = round_float(max_dd["len"], decimals=0) if max_dd["len"] is not None else None
+                
+                if "returns" in analyzer_results:
+                    returns = analyzer_results["returns"]
+                    if isinstance(returns, dict):
+                        if "rnorm100" in returns:
+                            all_metrics["normalized_return"] = round_float(returns["rnorm100"], decimals=2) if returns["rnorm100"] is not None else None
+                        if "rtot" in returns:
+                            all_metrics["total_return_pct"] = round_float(returns["rtot"], decimals=2) if returns["rtot"] is not None else None
 
             # Create predictions and actuals DataFrames for compatibility
             # For strategy backtest, we use the portfolio value over time

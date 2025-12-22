@@ -1,6 +1,7 @@
 """Backtest module for ATM project."""
 
 from atm.analysis.backtest.base import BaseBacktester, BacktestResult
+from atm.analysis.backtest.batch_evaluator import BatchStrategyEvaluator
 from atm.analysis.backtest.evaluator import BacktestEvaluator
 from atm.analysis.backtest.metrics import BacktestMetrics
 from atm.analysis.backtest.predictor_backtest import PredictorBacktester
@@ -11,6 +12,7 @@ __all__ = [
     "BaseBacktester",
     "BacktestResult",
     "BacktestEvaluator",
+    "BatchStrategyEvaluator",
     "BacktestMetrics",
     "PredictorBacktester",
     "StrategyBacktester",

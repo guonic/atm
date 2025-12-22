@@ -132,6 +132,28 @@ class StockQuoteSnapshot(BaseModel):
         }
 
 
+class StockPremarket(BaseModel):
+    """Stock premarket information model (股本情况盘前数据)."""
+
+    trade_date: date = Field(..., description="Trading date (YYYY-MM-DD)")
+    ts_code: str = Field(..., description="Stock code (e.g., 000001.SZ)")
+    total_share: Optional[Decimal] = Field(None, description="Total shares (10K shares)")
+    float_share: Optional[Decimal] = Field(None, description="Float shares (10K shares)")
+    pre_close: Optional[Decimal] = Field(None, description="Previous close price")
+    up_limit: Optional[Decimal] = Field(None, description="Today's upper limit price (涨停价)")
+    down_limit: Optional[Decimal] = Field(None, description="Today's lower limit price (跌停价)")
+    update_time: Optional[datetime] = Field(None, description="Update time")
+
+    class Config:
+        """Pydantic configuration."""
+
+        json_encoders = {
+            date: lambda v: v.isoformat() if v else None,
+            datetime: lambda v: v.isoformat() if v else None,
+            Decimal: lambda v: float(v) if v else None,
+        }
+
+
 class StockKlineSyncState(BaseModel):
     """Stock K-line synchronization state model."""
 

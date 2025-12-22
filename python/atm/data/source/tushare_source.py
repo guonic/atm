@@ -300,6 +300,45 @@ class TushareSource(BaseSource):
             **params,
         )
 
+    def fetch_premarket(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        fields: Optional[str] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Fetch stock premarket information (股本情况盘前数据).
+
+        Args:
+            ts_code: Stock code (e.g., '000001.SZ').
+            trade_date: Trading date (YYYYMMDD).
+            start_date: Start date (YYYYMMDD).
+            end_date: End date (YYYYMMDD).
+            fields: Fields to retrieve.
+
+        Yields:
+            Premarket records.
+
+        Reference: https://tushare.pro/document/2?doc_id=329
+        """
+        params = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        return self.fetch(
+            api_name="stk_premarket",
+            fields=fields or self.config.fields,
+            **params,
+        )
+
     def fetch_pro_bar(
         self,
         ts_code: str,

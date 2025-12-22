@@ -24,7 +24,7 @@ class BacktestResult(BaseModel):
     end_date: datetime = Field(..., description="End date of backtest period")
     predictions: pd.DataFrame = Field(..., description="Predicted data")
     actuals: pd.DataFrame = Field(..., description="Actual data for comparison")
-    metrics: Dict[str, float] = Field(default_factory=dict, description="Backtest metrics")
+    metrics: Dict[str, Any] = Field(default_factory=dict, description="Backtest metrics")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
     class Config:
