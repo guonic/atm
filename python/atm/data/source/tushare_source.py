@@ -6,10 +6,14 @@ Reference: https://tushare.pro/document/1?doc_id=131
 """
 
 import logging
+import warnings
 from typing import Any, Dict, Iterator, Optional
 
 import pandas as pd
 import tushare as ts
+
+# Suppress FutureWarning from tushare library about fillna method
+warnings.filterwarnings("ignore", category=FutureWarning, module="tushare")
 
 from atm.data.source.base import (
     BaseSource,
