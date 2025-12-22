@@ -5,10 +5,12 @@ from atm.trading.indicators.chip_peak import (
     ChipPeakPattern,
     DummyChipPeakIndicator,
 )
+from atm.trading.indicators.hma import HullMovingAverage
 
 __all__ = [
     "ChipPeakIndicator",
     "ChipPeakPattern",
     "DummyChipPeakIndicator",
+    "HullMovingAverage",
 ]
 
