@@ -9,6 +9,7 @@ from atm.trading.strategy.arg_parser import (
 from atm.trading.strategy.base import BaseStrategy, StrategyConfig
 from atm.trading.strategy.atr_strategy import ATRStrategy
 from atm.trading.strategy.bollinger_60min_strategy import Bollinger60MinStrategy
+from atm.trading.strategy.bollinger_daily_strategy import BollingerDailyStrategy
 from atm.trading.strategy.chip_peak_strategy import ChipPeakStrategy
 from atm.trading.strategy.cci_strategy import CCIStrategy
 from atm.trading.strategy.cci_strategy_optimized import CCIStrategyOptimized
@@ -26,6 +27,7 @@ __all__ = [
     "CCIStrategyOptimized",
     "ATRStrategy",
     "Bollinger60MinStrategy",
+    "BollingerDailyStrategy",
     "ChipPeakStrategy",
     "FibonacciMAStrategy",
     "ImprovedMACDStrategy",

@@ -233,26 +233,26 @@ def _load_kline_data(
     if not klines:
         return pd.DataFrame()
 
-        # Convert to DataFrame
-        data_list = []
-        for kline in klines:
-            # Handle different time column names
-            if kline_type == "day":
-                datetime_value = kline.trade_date
-            else:
-                # For hour/minutes, use trade_time
-                datetime_value = getattr(kline, "trade_time", None) or getattr(kline, "trade_date", None)
+    # Convert to DataFrame
+    data_list = []
+    for kline in klines:
+        # Handle different time column names
+        if kline_type == "day":
+            datetime_value = kline.trade_date
+        else:
+            # For hour/minutes, use trade_time
+            datetime_value = getattr(kline, "trade_time", None) or getattr(kline, "trade_date", None)
 
-            data_list.append(
-                {
-                    "datetime": datetime_value,
-                    "open": float(kline.open) if kline.open else None,
-                    "high": float(kline.high) if kline.high else None,
-                    "low": float(kline.low) if kline.low else None,
-                    "close": float(kline.close) if kline.close else None,
-                    "volume": int(kline.volume) if kline.volume else 0,
-                }
-            )
+        data_list.append(
+            {
+                "datetime": datetime_value,
+                "open": float(kline.open) if kline.open else None,
+                "high": float(kline.high) if kline.high else None,
+                "low": float(kline.low) if kline.low else None,
+                "close": float(kline.close) if kline.close else None,
+                "volume": int(kline.volume) if kline.volume else 0,
+            }
+        )
 
     df = pd.DataFrame(data_list)
 
