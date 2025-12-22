@@ -12,7 +12,14 @@ import backtrader as bt
 import pandas as pd
 
 from atm.config import DatabaseConfig
-from atm.repo.kline_repo import StockKlineDayRepo
+from atm.repo.kline_repo import (
+    StockKlineDayRepo,
+    StockKlineHourRepo,
+    StockKline30MinRepo,
+    StockKline15MinRepo,
+    StockKline5MinRepo,
+    StockKline1MinRepo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,7 @@ class DatabaseDataFeed(bt.feeds.PandasData):
         ("start_date", None),  # Start date
         ("end_date", None),  # End date
         ("schema", "quant"),  # Database schema
+        ("kline_type", "day"),  # K-line type: day, hour, 30min, 15min, 5min, 1min
     )
 
     def _load(self):
@@ -63,6 +71,7 @@ class DatabaseDataFeed(bt.feeds.PandasData):
             start_date=self.p.start_date,
             end_date=self.p.end_date,
             schema=self.p.schema,
+            kline_type=self.p.kline_type,
         )
 
         if df.empty:
@@ -89,6 +98,7 @@ class DatabaseDataFeed(bt.feeds.PandasData):
         start_date: Optional[datetime],
         end_date: Optional[datetime],
         schema: str,
+        kline_type: str = "day",
     ) -> pd.DataFrame:
         """
         Load K-line data from database.
@@ -99,11 +109,23 @@ class DatabaseDataFeed(bt.feeds.PandasData):
             start_date: Start date.
             end_date: End date.
             schema: Database schema.
+            kline_type: K-line type (day, hour, 30min, 15min, 5min, 1min).
 
         Returns:
             DataFrame with OHLCV data.
         """
-        repo = StockKlineDayRepo(db_config, schema)
+        # Select appropriate repo based on kline_type
+        repo_map = {
+            "day": StockKlineDayRepo,
+            "hour": StockKlineHourRepo,
+            "30min": StockKline30MinRepo,
+            "15min": StockKline15MinRepo,
+            "5min": StockKline5MinRepo,
+            "1min": StockKline1MinRepo,
+        }
+
+        repo_class = repo_map.get(kline_type, StockKlineDayRepo)
+        repo = repo_class(db_config, schema)
         klines = repo.get_by_ts_code(
             ts_code=ts_code,
             start_time=start_date,
@@ -116,9 +138,16 @@ class DatabaseDataFeed(bt.feeds.PandasData):
         # Convert to DataFrame
         data_list = []
         for kline in klines:
+            # Handle different time column names
+            if kline_type == "day":
+                datetime_value = kline.trade_date
+            else:
+                # For hour/minutes, use trade_time
+                datetime_value = getattr(kline, "trade_time", None) or getattr(kline, "trade_date", None)
+
             data_list.append(
                 {
-                    "datetime": kline.trade_date,
+                    "datetime": datetime_value,
                     "open": float(kline.open) if kline.open else None,
                     "high": float(kline.high) if kline.high else None,
                     "low": float(kline.low) if kline.low else None,
@@ -167,6 +196,7 @@ def _load_kline_data(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     schema: str = "quant",
+    kline_type: str = "day",
 ) -> pd.DataFrame:
     """
     Load K-line data from database and convert to DataFrame.
@@ -177,11 +207,23 @@ def _load_kline_data(
         start_date: Start date.
         end_date: End date.
         schema: Database schema.
+        kline_type: K-line type (day, hour, 30min, 15min, 5min, 1min).
 
     Returns:
         DataFrame with OHLCV data.
     """
-    repo = StockKlineDayRepo(db_config, schema)
+    # Select appropriate repo based on kline_type
+    repo_map = {
+        "day": StockKlineDayRepo,
+        "hour": StockKlineHourRepo,
+        "30min": StockKline30MinRepo,
+        "15min": StockKline15MinRepo,
+        "5min": StockKline5MinRepo,
+        "1min": StockKline1MinRepo,
+    }
+
+    repo_class = repo_map.get(kline_type, StockKlineDayRepo)
+    repo = repo_class(db_config, schema)
     klines = repo.get_by_ts_code(
         ts_code=ts_code,
         start_time=start_date,
@@ -194,9 +236,16 @@ def _load_kline_data(
     # Convert to DataFrame
     data_list = []
     for kline in klines:
+        # Handle different time column names
+        if kline_type == "day":
+            datetime_value = kline.trade_date
+        else:
+            # For hour/minutes, use trade_time
+            datetime_value = getattr(kline, "trade_time", None) or getattr(kline, "trade_date", None)
+
         data_list.append(
             {
-                "datetime": kline.trade_date,
+                "datetime": datetime_value,
                 "open": float(kline.open) if kline.open else None,
                 "high": float(kline.high) if kline.high else None,
                 "low": float(kline.low) if kline.low else None,
@@ -245,6 +294,7 @@ def create_data_feed(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     schema: str = "quant",
+    kline_type: str = "day",
 ) -> bt.feeds.PandasData:
     """
     Create a database data feed for backtrader.
@@ -266,6 +316,7 @@ def create_data_feed(
         start_date=start_date,
         end_date=end_date,
         schema=schema,
+        kline_type=kline_type,
     )
 
     if df.empty:

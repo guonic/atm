@@ -8,8 +8,14 @@ from atm.trading.strategy.arg_parser import (
 )
 from atm.trading.strategy.base import BaseStrategy, StrategyConfig
 from atm.trading.strategy.atr_strategy import ATRStrategy
+from atm.trading.strategy.bollinger_60min_strategy import Bollinger60MinStrategy
+from atm.trading.strategy.bollinger_daily_strategy import BollingerDailyStrategy
+from atm.trading.strategy.chip_peak_strategy import ChipPeakStrategy
+from atm.trading.strategy.hma_strategy import HMAStrategy
 from atm.trading.strategy.cci_strategy import CCIStrategy
 from atm.trading.strategy.cci_strategy_optimized import CCIStrategyOptimized
+from atm.trading.strategy.fibonacci_ma_strategy import FibonacciMAStrategy
+from atm.trading.strategy.improved_macd_strategy import ImprovedMACDStrategy
 from atm.trading.strategy.strategy_runner import StrategyRunner
 from atm.trading.strategy.sma_cross_strategy import SMACrossStrategy
 
@@ -21,6 +27,12 @@ __all__ = [
     "CCIStrategy",
     "CCIStrategyOptimized",
     "ATRStrategy",
+    "Bollinger60MinStrategy",
+    "BollingerDailyStrategy",
+    "ChipPeakStrategy",
+    "HMAStrategy",
+    "FibonacciMAStrategy",
+    "ImprovedMACDStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",

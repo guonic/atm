@@ -66,6 +66,7 @@ class StrategyRunner:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         schema: str = "quant",
+        kline_type: str = "day",
     ) -> None:
         """
         Add data feed to cerebro.
@@ -75,8 +76,11 @@ class StrategyRunner:
             start_date: Start date for data (inclusive).
             end_date: End date for data (inclusive).
             schema: Database schema name.
+            kline_type: K-line type (day, hour, 30min, 15min, 5min, 1min).
         """
-        logger.info(f"Loading data for {ts_code} from {start_date} to {end_date}")
+        logger.info(
+            f"Loading {kline_type} data for {ts_code} from {start_date} to {end_date}"
+        )
         try:
             data_feed = create_data_feed(
                 db_config=self.db_config,
@@ -84,6 +88,7 @@ class StrategyRunner:
                 start_date=start_date,
                 end_date=end_date,
                 schema=schema,
+                kline_type=kline_type,
             )
             self.cerebro.adddata(data_feed)
         except Exception as e:
@@ -150,9 +155,13 @@ class StrategyRunner:
             logger.error(f"Failed to plot: {e}")
             logger.info("Plotting requires matplotlib. Install with: pip install matplotlib")
 
-    def run(self) -> Any:
+    def run(self, optreturn: bool = False) -> Any:
         """
         Run backtest.
+
+        Args:
+            optreturn: If True, use optimized run mode (faster but may have issues with insufficient data).
+                      If False, use standard run mode (default: False).
 
         Returns:
             Backtest results from cerebro.run().
@@ -160,7 +169,8 @@ class StrategyRunner:
         logger.info("Running backtest...")
         logger.info(f"Starting Portfolio Value: {self.cerebro.broker.getvalue():.2f}")
 
-        results = self.cerebro.run()
+        # Use standard run mode to avoid array index issues with insufficient data
+        results = self.cerebro.run(optreturn=optreturn)
 
         logger.info(f"Final Portfolio Value: {self.cerebro.broker.getvalue():.2f}")
 
@@ -335,6 +345,7 @@ class StrategyRunner:
         schema: str = "quant",
         strategy_params: Optional[Dict[str, Any]] = None,
         add_analyzers: bool = True,
+        kline_type: str = "day",
     ) -> "StrategyRunner":
         """
         Run a strategy with all necessary parameters in one call.
@@ -353,6 +364,7 @@ class StrategyRunner:
             schema: Database schema name (default: 'quant').
             strategy_params: Strategy parameters dictionary (default: None).
             add_analyzers: Whether to add analyzers (default: True).
+            kline_type: K-line type (day, hour, 30min, 15min, 5min, 1min) (default: 'day').
 
         Returns:
             StrategyRunner instance with results available via get_results() and get_analyzer_results().
@@ -369,6 +381,7 @@ class StrategyRunner:
             start_date=start_date,
             end_date=end_date,
             schema=schema,
+            kline_type=kline_type,
         )
 
         runner.add_strategy(
