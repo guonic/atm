@@ -16,6 +16,7 @@ from atm.models.stock import (
     StockBasic,
     StockClassify,
     StockFinanceBasic,
+    StockKlineSyncState,
     StockQuoteSnapshot,
     StockTradeRule,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "StockTradeRule",
     "StockFinanceBasic",
     "StockQuoteSnapshot",
+    "StockKlineSyncState",
     # K-line models
     "StockKlineQuarter",
     "StockKlineMonth",

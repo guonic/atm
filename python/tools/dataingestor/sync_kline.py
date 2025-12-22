@@ -14,7 +14,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from atm.config import DatabaseConfig, load_config
+from atm.config import load_config
 from atm.repo import DatabaseStateRepo, FileStateRepo
 from tools.dataingestor.service.kline_sync_service import KlineSyncService
 

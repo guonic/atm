@@ -132,3 +132,22 @@ class StockQuoteSnapshot(BaseModel):
         }
 
 
+class StockKlineSyncState(BaseModel):
+    """Stock K-line synchronization state model."""
+
+    ts_code: str = Field(..., description="Stock code (e.g., 000001.SZ)")
+    kline_type: str = Field(..., description="K-line type (day/week/month/hour/5min/15min/30min/1min)")
+    last_synced_date: Optional[date] = Field(None, description="Last synced date (YYYY-MM-DD)")
+    last_synced_time: Optional[datetime] = Field(None, description="Last synced timestamp")
+    total_records: int = Field(0, description="Total records synced")
+    update_time: Optional[datetime] = Field(None, description="Last update time")
+
+    class Config:
+        """Pydantic configuration."""
+
+        json_encoders = {
+            date: lambda v: v.isoformat() if v else None,
+            datetime: lambda v: v.isoformat() if v else None,
+        }
+
+
