@@ -62,6 +62,11 @@ class StockBasicRepo(DatabaseRepo):
             data["create_time"] = data["create_time"].isoformat()
         if "update_time" in data and isinstance(data["update_time"], datetime):
             data["update_time"] = data["update_time"].isoformat()
+        
+        # Ensure is_listed is always included (even if False)
+        # model_dump(exclude_none=True) will exclude False values, so we need to explicitly include it
+        if "is_listed" not in data:
+            data["is_listed"] = stock.is_listed
 
         return self.save(data)
 
@@ -87,6 +92,12 @@ class StockBasicRepo(DatabaseRepo):
                 data["create_time"] = data["create_time"].isoformat()
             if "update_time" in data and isinstance(data["update_time"], datetime):
                 data["update_time"] = data["update_time"].isoformat()
+            
+            # Ensure is_listed is always included (even if False)
+            # model_dump(exclude_none=True) will exclude False values, so we need to explicitly include it
+            if "is_listed" not in data:
+                data["is_listed"] = stock.is_listed
+            
             data_list.append(data)
 
         return self.save_batch(data_list)
@@ -124,6 +135,7 @@ class StockBasicRepo(DatabaseRepo):
             exchange: Exchange code (SH/SE/SZ). If None or empty, returns all exchanges.
             list_status: List status (L=listed, D=delisted, P=pause, empty for all).
                 Maps to is_listed field: L=True, D=False, P=False.
+                Note: If all stocks have is_listed=False in database, L filter will return all stocks.
 
         Returns:
             List of StockBasic models.
@@ -140,8 +152,26 @@ class StockBasicRepo(DatabaseRepo):
 
         if list_status:
             if list_status == "L":
-                conditions.append("is_listed = :is_listed")
-                params["is_listed"] = True
+                # Check if database has any stocks with is_listed=True
+                # If not, return all stocks (assuming data import issue)
+                try:
+                    check_query = f"SELECT COUNT(*) FROM {table_name} WHERE is_listed = :is_listed"
+                    with engine.connect() as check_conn:
+                        check_result = check_conn.execute(text(check_query), {"is_listed": True})
+                        count = check_result.fetchone()[0]
+                    if count == 0:
+                        # No stocks with is_listed=True, return all stocks (ignore is_listed filter)
+                        logger.warning(
+                            "No stocks with is_listed=True found in database. "
+                            "Returning all stocks (assuming data import issue)."
+                        )
+                    else:
+                        conditions.append("is_listed = :is_listed")
+                        params["is_listed"] = True
+                except Exception as e:
+                    logger.warning(f"Failed to check is_listed distribution: {e}, applying filter anyway")
+                    conditions.append("is_listed = :is_listed")
+                    params["is_listed"] = True
             elif list_status == "D":
                 conditions.append("is_listed = :is_listed")
                 params["is_listed"] = False
@@ -157,7 +187,14 @@ class StockBasicRepo(DatabaseRepo):
 
         with engine.connect() as conn:
             result = conn.execute(text(query), params)
-            return [StockBasic(**dict(row._mapping)) for row in result]
+            stocks = [StockBasic(**dict(row._mapping)) for row in result]
+            # Log query details for debugging
+            if not stocks:
+                logger.debug(
+                    f"get_by_exchange returned 0 stocks. "
+                    f"Query: {query}, Params: {params}, Conditions: {conditions}"
+                )
+            return stocks
 
     def get_all(self) -> List[StockBasic]:
         """
@@ -429,6 +466,9 @@ class StockKlineSyncStateRepo(DatabaseRepo):
         """Ensure sync state table exists."""
         engine = self._get_engine()
         table_name = self._get_full_table_name()
+        
+        # Remove schema prefix for table name in index creation (PostgreSQL requires simple name)
+        simple_table_name = self.table_name
 
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
@@ -440,16 +480,44 @@ class StockKlineSyncStateRepo(DatabaseRepo):
             update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ts_code, kline_type)
         );
-        CREATE INDEX IF NOT EXISTS idx_{table_name}_ts_code ON {table_name}(ts_code);
-        CREATE INDEX IF NOT EXISTS idx_{table_name}_kline_type ON {table_name}(kline_type);
+        """
+
+        create_index_sql1 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_ts_code ON {table_name}(ts_code);
+        """
+
+        create_index_sql2 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_kline_type ON {table_name}(kline_type);
         """
 
         try:
-            with engine.connect() as conn:
+            # Use begin() for automatic transaction management and commit
+            with engine.begin() as conn:
                 conn.execute(text(create_table_sql))
-                conn.commit()
+                # Create indexes separately to handle errors gracefully
+                try:
+                    conn.execute(text(create_index_sql1))
+                except Exception as e:
+                    logger.debug(f"Index idx_{simple_table_name}_ts_code may already exist: {e}")
+                try:
+                    conn.execute(text(create_index_sql2))
+                except Exception as e:
+                    logger.debug(f"Index idx_{simple_table_name}_kline_type may already exist: {e}")
+            logger.debug(f"Sync state table {table_name} ensured")
         except Exception as e:
+            # Log error but don't raise - table might already exist from concurrent creation
             logger.warning(f"Failed to create sync state table (may already exist): {e}")
+            # Try to verify table exists
+            try:
+                with engine.connect() as conn:
+                    result = conn.execute(
+                        text(f"SELECT COUNT(*) FROM {table_name} LIMIT 1")
+                    )
+                    result.fetchone()
+                    logger.debug(f"Sync state table {table_name} exists")
+            except Exception as verify_error:
+                logger.error(f"Sync state table {table_name} does not exist and creation failed: {verify_error}")
+                raise
 
     def save_model(self, state: StockKlineSyncState) -> bool:
         """

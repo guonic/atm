@@ -6,12 +6,14 @@ Synchronizes K-line data for all stocks, checking existing data and syncing from
 
 import logging
 import sys
+from collections import Counter
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
+from sqlalchemy import text
 
 # Ensure project path is in sys.path before importing atm modules
 _project_root = Path(__file__).parent.parent.parent.parent
@@ -58,6 +60,7 @@ logger = logging.getLogger(__name__)
 
 # Tushare API limits
 TUSHARE_MAX_RECORDS = 6000  # Maximum records per API request
+TUSHARE_MAX_STOCKS = 1000  # Maximum stock codes per API request
 
 # Mapping from kline type to model and repo classes
 KLINE_TYPE_MAP = {
@@ -220,6 +223,11 @@ class KlineSyncService:
         """Get or create sync state repository."""
         if self._sync_state_repo is None:
             self._sync_state_repo = StockKlineSyncStateRepo(self.db_config)
+            # Ensure table exists (will be created in __init__, but double-check)
+            try:
+                self._sync_state_repo._ensure_table()
+            except Exception as e:
+                logger.warning(f"Failed to ensure sync state table: {e}")
         return self._sync_state_repo
 
     @property
@@ -456,7 +464,32 @@ class KlineSyncService:
 
                 # Get all stocks from database
                 logger.info(f"Fetching stocks from database: exchange={exchange or 'ALL'}, list_status={list_status or 'ALL'}")
+                
+                # Debug: Check total stocks and is_listed field distribution
+                all_stocks = self.stock_repo.get_all()
+                all_stocks_count = len(all_stocks)
+                logger.info(f"Total stocks in database: {all_stocks_count}")
+                
+                if all_stocks_count > 0:
+                    # Check is_listed field distribution
+                    is_listed_dist = Counter(str(stock.is_listed) for stock in all_stocks[:100])
+                    logger.info(f"is_listed field sample (first 100): {dict(is_listed_dist)}")
+                    
+                    # Check actual database values
+                    try:
+                        engine = self.stock_repo._get_engine()
+                        table_name = self.stock_repo._get_full_table_name()
+                        with engine.connect() as conn:
+                            result = conn.execute(
+                                text(f"SELECT is_listed, COUNT(*) as cnt FROM {table_name} GROUP BY is_listed LIMIT 10")
+                            )
+                            db_dist = {str(row[0]): row[1] for row in result}
+                            logger.info(f"Database is_listed distribution: {db_dist}")
+                    except Exception as e:
+                        logger.warning(f"Failed to check database is_listed distribution: {e}")
+                
                 stocks = self.stock_repo.get_by_exchange(exchange=exchange, list_status=list_status)
+                logger.info(f"Filtered stocks count: {len(stocks)}")
 
                 total_stocks = len(stocks)
                 logger.info(f"Found {total_stocks} stocks to sync")
@@ -733,35 +766,20 @@ class KlineSyncService:
                 # Use batch API call for multiple stocks
                 ts_codes = [item["ts_code"] for item in group_items]
                 
-                # Estimate data volume and split if exceeds Tushare limit
-                estimated_records = self._estimate_data_volume(
-                    ts_codes=ts_codes,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-                
-                if estimated_records > TUSHARE_MAX_RECORDS:
-                    # Need to split by stocks or time range
+                # Check stock count limit first (Tushare allows max 1000 stocks per request)
+                if len(ts_codes) > TUSHARE_MAX_STOCKS:
                     logger.info(
-                        f"  Estimated {estimated_records} records exceeds Tushare limit ({TUSHARE_MAX_RECORDS}), "
-                        f"splitting into smaller batches"
+                        f"  Stock count ({len(ts_codes)}) exceeds Tushare limit ({TUSHARE_MAX_STOCKS}), "
+                        f"splitting into batches of {TUSHARE_MAX_STOCKS}"
                     )
-                    
-                    # Calculate max stocks per batch based on estimated records per stock
-                    records_per_stock = estimated_records / len(ts_codes) if ts_codes else 0
-                    if records_per_stock > 0:
-                        max_stocks_per_batch = max(1, int(TUSHARE_MAX_RECORDS / records_per_stock))
-                    else:
-                        max_stocks_per_batch = max_batch_stocks
-                    
-                    # Split stocks into batches
-                    for i in range(0, len(ts_codes), max_stocks_per_batch):
-                        batch_ts_codes = ts_codes[i:i + max_stocks_per_batch]
-                        batch_items = group_items[i:i + max_stocks_per_batch]
+                    # Split by stock count limit
+                    for i in range(0, len(ts_codes), TUSHARE_MAX_STOCKS):
+                        batch_ts_codes = ts_codes[i:i + TUSHARE_MAX_STOCKS]
+                        batch_items = group_items[i:i + TUSHARE_MAX_STOCKS]
                         
                         logger.info(
-                            f"  Batch API call for {len(batch_ts_codes)} stocks ({self.kline_type}): "
-                            f"{batch_ts_codes[0]} ... {batch_ts_codes[-1]}"
+                            f"  Batch {i // TUSHARE_MAX_STOCKS + 1}: {len(batch_ts_codes)} stocks "
+                            f"({batch_ts_codes[0]} ... {batch_ts_codes[-1]})"
                         )
                         
                         batch_results = self._batch_sync_kline_by_type(
@@ -772,19 +790,58 @@ class KlineSyncService:
                         )
                         results.update(batch_results)
                 else:
-                    # Can process all stocks in one batch
-                    logger.info(
-                        f"  Batch API call for {len(ts_codes)} stocks ({self.kline_type}): "
-                        f"{ts_codes[0]} ... {ts_codes[-1]}"
-                    )
-                    
-                    batch_results = self._batch_sync_kline_by_type(
+                    # Estimate data volume and split if exceeds Tushare limit
+                    estimated_records = self._estimate_data_volume(
                         ts_codes=ts_codes,
                         start_date=start_date,
                         end_date=end_date,
-                        batch_size=batch_size,
                     )
-                    results.update(batch_results)
+                    
+                    if estimated_records > TUSHARE_MAX_RECORDS:
+                        # Need to split by stocks or time range based on data volume
+                        logger.info(
+                            f"  Estimated {estimated_records} records exceeds Tushare limit ({TUSHARE_MAX_RECORDS}), "
+                            f"splitting into smaller batches"
+                        )
+                        
+                        # Calculate max stocks per batch based on estimated records per stock
+                        records_per_stock = estimated_records / len(ts_codes) if ts_codes else 0
+                        if records_per_stock > 0:
+                            max_stocks_per_batch = max(1, min(TUSHARE_MAX_STOCKS, int(TUSHARE_MAX_RECORDS / records_per_stock)))
+                        else:
+                            max_stocks_per_batch = min(TUSHARE_MAX_STOCKS, max_batch_stocks)
+                        
+                        # Split stocks into batches
+                        for i in range(0, len(ts_codes), max_stocks_per_batch):
+                            batch_ts_codes = ts_codes[i:i + max_stocks_per_batch]
+                            batch_items = group_items[i:i + max_stocks_per_batch]
+                            
+                            logger.info(
+                                f"  Batch API call for {len(batch_ts_codes)} stocks ({self.kline_type}): "
+                                f"{batch_ts_codes[0]} ... {batch_ts_codes[-1]}"
+                            )
+                            
+                            batch_results = self._batch_sync_kline_by_type(
+                                ts_codes=batch_ts_codes,
+                                start_date=start_date,
+                                end_date=end_date,
+                                batch_size=batch_size,
+                            )
+                            results.update(batch_results)
+                    else:
+                        # Can process all stocks in one batch
+                        logger.info(
+                            f"  Batch API call for {len(ts_codes)} stocks ({self.kline_type}): "
+                            f"{ts_codes[0]} ... {ts_codes[-1]}"
+                        )
+                        
+                        batch_results = self._batch_sync_kline_by_type(
+                            ts_codes=ts_codes,
+                            start_date=start_date,
+                            end_date=end_date,
+                            batch_size=batch_size,
+                        )
+                        results.update(batch_results)
             else:
                 # Process individually (single stock)
                 for item in group_items:
@@ -866,6 +923,29 @@ class KlineSyncService:
             Dictionary mapping ts_code to statistics.
         """
         results = {ts_code: {"fetched": 0, "saved": 0, "errors": 0} for ts_code in ts_codes}
+        
+        # Check if ts_codes exceeds Tushare limit
+        if len(ts_codes) > TUSHARE_MAX_STOCKS:
+            logger.warning(
+                f"  Stock count ({len(ts_codes)}) exceeds Tushare limit ({TUSHARE_MAX_STOCKS}), "
+                f"splitting into smaller batches"
+            )
+            # Split into batches
+            batch_results = {}
+            for i in range(0, len(ts_codes), TUSHARE_MAX_STOCKS):
+                batch_ts_codes = ts_codes[i:i + TUSHARE_MAX_STOCKS]
+                logger.info(
+                    f"  Processing batch {i // TUSHARE_MAX_STOCKS + 1}: "
+                    f"{len(batch_ts_codes)} stocks ({batch_ts_codes[0]} ... {batch_ts_codes[-1]})"
+                )
+                batch_result = self._batch_sync_kline_by_type(
+                    ts_codes=batch_ts_codes,
+                    start_date=start_date,
+                    end_date=end_date,
+                    batch_size=batch_size,
+                )
+                batch_results.update(batch_result)
+            return batch_results
         
         try:
             logger.info(

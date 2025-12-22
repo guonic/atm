@@ -242,7 +242,11 @@ class StockIngestorService:
 
                     try:
                         # Convert Tushare record to StockBasic model
-                        stock = self._convert_to_stock_basic(record)
+                        # Note: list_status is a query parameter, not in the returned data
+                        # So we pass it explicitly to set is_listed correctly
+                        stock = self._convert_to_stock_basic(
+                            record, record_index=record_count, list_status=list_status
+                        )
                         if stock:
                             batch.append(stock)
 
@@ -664,7 +668,9 @@ class StockIngestorService:
         """
         return self.state_repo.delete_state(task_name)
 
-    def _convert_to_stock_basic(self, record: Dict) -> Optional[StockBasic]:
+    def _convert_to_stock_basic(
+        self, record: Dict, record_index: Optional[int] = None, list_status: Optional[str] = None
+    ) -> Optional[StockBasic]:
         """
         Convert Tushare record to StockBasic model.
 
@@ -729,6 +735,25 @@ class StockIngestorService:
                     logger.debug(f"Skipping record with empty market and cannot infer from ts_code: ts_code={ts_code}")
                     return None
 
+            # Determine is_listed based on list_status parameter
+            # Note: Tushare API uses list_status as a query parameter to filter results,
+            # but does not return it in the response. So we use the query parameter value.
+            if list_status:
+                # Use the query parameter value (passed from ingest_stock_basic)
+                is_listed = list_status == "L"
+            else:
+                # Fallback: try to get from record (though it's usually not present)
+                list_status_value = record.get("list_status", "").strip()
+                is_listed = list_status_value == "L" if list_status_value else True  # Default to True if unknown
+            
+            # Log first few records for debugging
+            if record_index is not None and record_index <= 5:
+                logger.info(
+                    f"Sample record {record_index}: ts_code={ts_code}, "
+                    f"list_status_param={list_status}, is_listed={is_listed}, "
+                    f"record_keys={list(record.keys())}"
+                )
+
             try:
                 return StockBasic(
                     ts_code=ts_code,
@@ -738,7 +763,7 @@ class StockIngestorService:
                     market=market,
                     list_date=list_date,
                     delist_date=delist_date,
-                    is_listed=record.get("list_status", "") == "L",
+                    is_listed=is_listed,
                     currency=record.get("currency", "CNY").strip() or "CNY",
                 )
             except Exception as e:
