@@ -8,6 +8,7 @@ from atm.trading.strategy.arg_parser import (
 )
 from atm.trading.strategy.base import BaseStrategy, StrategyConfig
 from atm.trading.strategy.atr_strategy import ATRStrategy
+from atm.trading.strategy.chip_peak_strategy import ChipPeakStrategy
 from atm.trading.strategy.cci_strategy import CCIStrategy
 from atm.trading.strategy.cci_strategy_optimized import CCIStrategyOptimized
 from atm.trading.strategy.fibonacci_ma_strategy import FibonacciMAStrategy
@@ -23,6 +24,7 @@ __all__ = [
     "CCIStrategy",
     "CCIStrategyOptimized",
     "ATRStrategy",
+    "ChipPeakStrategy",
     "FibonacciMAStrategy",
     "ImprovedMACDStrategy",
     "create_strategy_parser",
