@@ -150,9 +150,13 @@ class StrategyRunner:
             logger.error(f"Failed to plot: {e}")
             logger.info("Plotting requires matplotlib. Install with: pip install matplotlib")
 
-    def run(self) -> Any:
+    def run(self, optreturn: bool = False) -> Any:
         """
         Run backtest.
+
+        Args:
+            optreturn: If True, use optimized run mode (faster but may have issues with insufficient data).
+                      If False, use standard run mode (default: False).
 
         Returns:
             Backtest results from cerebro.run().
@@ -160,7 +164,8 @@ class StrategyRunner:
         logger.info("Running backtest...")
         logger.info(f"Starting Portfolio Value: {self.cerebro.broker.getvalue():.2f}")
 
-        results = self.cerebro.run()
+        # Use standard run mode to avoid array index issues with insufficient data
+        results = self.cerebro.run(optreturn=optreturn)
 
         logger.info(f"Final Portfolio Value: {self.cerebro.broker.getvalue():.2f}")
 
