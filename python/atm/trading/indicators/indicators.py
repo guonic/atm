@@ -36,6 +36,69 @@ class SentimentZoneOscillator(bt.Indicator):
         sign = 100 * sign/self.params.length
         self.lines.szo = btind.TripleExponentialMovingAverage(sign, period=self.params.length)
 
+class OnBalanceVolume(bt.Indicator):
+    """
+    On-Balance Volume (OBV) indicator.
+
+    Uses volume flow to gauge buying/selling pressure:
+    - Close up: add volume
+    - Close down: subtract volume
+    - Close unchanged: carry forward
+    """
+
+    lines = ("obv",)
+    params = ()
+
+    def __init__(self):
+        """Initialize OBV and enforce minimum period."""
+        super().__init__()
+        self.addminperiod(1)
+
+    def next(self):
+        """Compute OBV incrementally."""
+        if len(self.data) == 1:
+            # First bar initializes OBV with volume
+            self.lines.obv[0] = self.data.volume[0]
+            return
+
+        prev_obv = self.lines.obv[-1]
+        close_now = self.data.close[0]
+        close_prev = self.data.close[-1]
+        volume_now = self.data.volume[0]
+
+        if close_now > close_prev:
+            self.lines.obv[0] = prev_obv + volume_now
+        elif close_now < close_prev:
+            self.lines.obv[0] = prev_obv - volume_now
+        else:
+            self.lines.obv[0] = prev_obv
+
+class ChaikinMoneyFlow(bt.Indicator):
+    """
+    Chaikin Money Flow (CMF) indicator.
+
+    Measures buying/selling pressure by weighting volume with the close's
+    location within the high-low range.
+    """
+
+    lines = ("cmf",)
+    params = (("period", 20),)
+
+    def __init__(self):
+        """Initialize CMF components."""
+        super().__init__()
+        hl_range = bt.If(
+            self.data.high - self.data.low == 0,
+            1e-8,
+            self.data.high - self.data.low,
+        )
+        mfm = ((self.data.close - self.data.low) - (self.data.high - self.data.close)) / hl_range
+        mfv = mfm * self.data.volume
+        vol_sum = btind.SumN(self.data.volume, period=self.p.period)
+        mfv_sum = btind.SumN(mfv, period=self.p.period)
+        self.lines.cmf = mfv_sum / bt.If(vol_sum == 0, 1e-8, vol_sum)
+
+
 class VolumeMovingAverage(bt.Indicator):
     """
     Volume Weighted Moving Average indicator.
@@ -1196,6 +1259,41 @@ class DMIStoch(bt.Indicator):
         ll = btind.Lowest(osc, period=self.p.sumperiod)
 
         self.lines.stoch = btind.SumN(osc - ll, period=self.p.sumperiod) / btind.SumN(hh - ll, period=self.p.sumperiod) * 100
+
+
+class DMIIndicator(bt.Indicator):
+    """
+    DMI (Directional Movement Index) composite indicator.
+
+    Wraps Backtrader's DirectionalMovementIndex and exposes +DI, -DI, ADX, and ADXR.
+    ADXR is computed as a simple average of the current and previous ADX values.
+
+    Parameters:
+        period (int): DMI calculation period (default: 14).
+
+    Lines:
+        plus_di: +DI line (rising strength)
+        minus_di: -DI line (falling strength)
+        adx: Trend strength line
+        adxr: Smoothed trend strength (average of current and previous ADX)
+    """
+
+    lines = ("plus_di", "minus_di", "adx", "adxr")
+    params = (("period", 14),)
+
+    def __init__(self):
+        super().__init__()
+
+        base = btind.DirectionalMovementIndex(self.data, period=self.p.period)
+
+        # Map underlying lines
+        self.lines.plus_di = base.plusDI
+        self.lines.minus_di = base.minusDI
+        self.lines.adx = base.adx
+
+        # ADXR: average of current and previous ADX (simple smoothing)
+        self.lines.adxr = btind.MovAv.Simple(base.adx, period=2)
+
 
 class ZackVolatility(bt.Indicator):
     """

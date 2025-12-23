@@ -7,6 +7,11 @@ from atm.trading.indicators.chip_peak import (
 )
 from atm.trading.indicators.hma import HullMovingAverage
 from atm.trading.indicators.volume_weighted_momentum import VolumeWeightedMomentum
+from atm.trading.indicators.indicators import (
+    DMIIndicator,
+    OnBalanceVolume,
+    ChaikinMoneyFlow,
+)
 
 __all__ = [
     "ChipPeakIndicator",
@@ -14,5 +19,8 @@ __all__ = [
     "DummyChipPeakIndicator",
     "HullMovingAverage",
     "VolumeWeightedMomentum",
+    "DMIIndicator",
+    "OnBalanceVolume",
+    "ChaikinMoneyFlow",
 ]
 

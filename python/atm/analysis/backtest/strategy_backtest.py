@@ -84,6 +84,9 @@ class StrategyBacktester(BaseBacktester):
             # Extract kline_type from kwargs or use default
             kline_type = kwargs.get("kline_type", "day")
 
+            # Extract run_id from kwargs for signal tracking
+            run_id = kwargs.get("run_id")
+
             # Run strategy using StrategyRunner
             runner = StrategyRunner.run_strategy(
                 db_config=self.db_config,
@@ -98,6 +101,7 @@ class StrategyBacktester(BaseBacktester):
                 strategy_params=strategy_params,
                 add_analyzers=add_analyzers,
                 kline_type=kline_type,
+                run_id=run_id,
             )
 
             # Get basic results
@@ -185,6 +189,9 @@ class StrategyBacktester(BaseBacktester):
 
             logger.info(f"Strategy backtest completed. Final value: {basic_results.get('final_value', 0):.2f}")
 
+            # Get signals collected by the strategy
+            signals = runner.get_signals()
+
             return BacktestResult(
                 ts_code=ts_code,
                 backtest_date=datetime.now(),
@@ -199,6 +206,7 @@ class StrategyBacktester(BaseBacktester):
                     "initial_cash": self.initial_cash,
                     "commission": self.commission,
                     "slippage": self.slippage,
+                    "signals": signals,  # Store signals in metadata
                 },
             )
 

@@ -111,9 +111,19 @@ class BatchStrategyEvaluator:
             selected = random.sample(candidates, num_stocks)
             return [s.ts_code for s in selected]
         
-        # Use market cap filter
+        # Use market cap filter; if parameters missing, fallback to skip filter
         if min_market_cap is None or max_market_cap is None:
-            raise ValueError("min_market_cap and max_market_cap must be provided when skip_market_cap_filter=False")
+            logger.warning(
+                "min_market_cap/max_market_cap not provided, fallback to skip market cap filter"
+            )
+            return self.select_stocks(
+                min_market_cap=None,
+                max_market_cap=None,
+                num_stocks=num_stocks,
+                exchange=exchange,
+                random_seed=random_seed,
+                skip_market_cap_filter=True,
+            )
         
         # Convert to billions for display
         # total_mv unit is 10K CNY (万元)
@@ -246,6 +256,7 @@ class BatchStrategyEvaluator:
         strategy_params: Optional[Dict] = None,
         add_analyzers: bool = True,
         kline_type: str = "day",
+        run_id: Optional[str] = None,
     ) -> List[BacktestResult]:
         """
         Evaluate strategy on multiple stocks.
@@ -257,6 +268,8 @@ class BatchStrategyEvaluator:
             end_date: Backtest end date.
             strategy_params: Strategy parameters dictionary.
             add_analyzers: Whether to add analyzers (default: True).
+            kline_type: K-line type (default: 'day').
+            run_id: Backtest run ID for signal tracking (default: None).
 
         Returns:
             List of BacktestResult objects.
@@ -278,6 +291,7 @@ class BatchStrategyEvaluator:
                     strategy_params=strategy_params,
                     add_analyzers=add_analyzers,
                     kline_type=kline_type,
+                    run_id=run_id,
                 )
                 results.append(result)
 
