@@ -36,6 +36,55 @@ class SentimentZoneOscillator(bt.Indicator):
         sign = 100 * sign/self.params.length
         self.lines.szo = btind.TripleExponentialMovingAverage(sign, period=self.params.length)
 
+class OnBalanceVolume(bt.Indicator):
+    """
+    On-Balance Volume (OBV) Indicator.
+
+    OBV is a momentum indicator that uses volume flow to predict changes in stock price.
+    It accumulates volume on up days and subtracts volume on down days.
+
+    Calculation:
+    - If close > previous close: OBV = previous OBV + volume
+    - If close < previous close: OBV = previous OBV - volume
+    - If close = previous close: OBV = previous OBV
+
+    Parameters:
+        None
+
+    Lines:
+        obv: On-Balance Volume value.
+
+    Example:
+        obv = OnBalanceVolume(data)
+    """
+
+    lines = ("obv",)
+    params = ()
+
+    def __init__(self):
+        """Initialize On-Balance Volume indicator."""
+        super().__init__()
+        # Need at least 1 bar
+        self.addminperiod(1)
+
+    def next(self):
+        """Calculate OBV for current bar."""
+        if len(self.data) == 1:
+            # First bar: start from current volume
+            self.lines.obv[0] = self.data.volume[0]
+            return
+
+        # Compare current close with previous close
+        if self.data.close[0] > self.data.close[-1]:
+            # Price up: add volume
+            self.lines.obv[0] = self.lines.obv[-1] + self.data.volume[0]
+        elif self.data.close[0] < self.data.close[-1]:
+            # Price down: subtract volume
+            self.lines.obv[0] = self.lines.obv[-1] - self.data.volume[0]
+        else:
+            # Price unchanged: OBV stays the same
+            self.lines.obv[0] = self.lines.obv[-1]
+
 class VolumeMovingAverage(bt.Indicator):
     """
     Volume Weighted Moving Average indicator.
