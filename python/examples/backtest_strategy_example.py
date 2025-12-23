@@ -37,7 +37,7 @@ from datetime import datetime
 
 from atm.analysis.backtest import BacktestReport, StrategyBacktester
 from atm.config import load_config
-from atm.trading.strategy import SMACrossStrategy
+from atm.trading.strategies import SMACrossStrategy
 
 # Configure logging
 logging.basicConfig(

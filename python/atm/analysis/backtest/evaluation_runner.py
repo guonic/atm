@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, Type
 
 from atm.config import DatabaseConfig, load_config
-from atm.trading.strategy.base import BaseStrategy
+from atm.trading.strategies.base import BaseStrategy
 from .batch_evaluator import BatchStrategyEvaluator
 from .common_args import validate_dates
 

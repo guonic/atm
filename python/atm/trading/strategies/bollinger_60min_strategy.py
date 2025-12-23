@@ -1,22 +1,22 @@
 """
-Daily Bollinger Bands Trading Strategy.
+60-minute Bollinger Bands Trading Strategy.
 
-This strategy implements a trading system based on daily Bollinger Bands
-to identify medium-term trading opportunities.
+This strategy implements a short-term trading system based on 60-minute
+Bollinger Bands to capture the rhythm of main forces doing short-term trading.
 
 Buy signals (all must be true):
-1. K-line at lower band (oversold)
-2. Volume contraction (< 60% of average volume of previous 5 days)
+1. K-line at lower band (short-term oversold)
+2. Volume contraction (< 60% of average volume of previous 5 periods)
 3. Lower band turning upwards (crucial: not a lower band in continuous downtrend)
 
 Sell signals (all must be true):
-1. K-line at upper band (overbought)
-2. Volume expansion (> 150% of average volume of previous 5 days)
+1. K-line at upper band (short-term overbought)
+2. Volume expansion (> 150% of average volume of previous 5 periods)
 3. Upper band turning downwards (crucial: not an upper band in continuous uptrend)
 
 Pitfalls to avoid:
 - Avoid during sudden negative news (lower band can be broken through)
-- Medium-term holding limit: Do not hold for more than 20 days
+- Short-term holding limit: Do not hold for more than 3 days
 
 This strategy follows the standard backtrader pattern:
 - Indicators are initialized in __init__
@@ -30,25 +30,26 @@ from typing import Dict, Optional
 
 import backtrader as bt
 
-from atm.trading.strategy.base import BaseStrategy
+from atm.trading.strategies.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
 
-class BollingerDailyStrategy(BaseStrategy):
+class Bollinger60MinStrategy(BaseStrategy):
     """
-    Daily Bollinger Bands Trading Strategy.
+    60-minute Bollinger Bands Trading Strategy.
 
-    This strategy uses daily Bollinger Bands to identify medium-term
-    trading opportunities. Suitable for swing trading.
+    This strategy uses 60-minute Bollinger Bands to identify short-term
+    trading opportunities. The 60-minute timeframe is ideal for capturing
+    the rhythm of main forces doing short-term trading.
 
     Buy signals (all must be true):
-    1. K-line at lower band (oversold)
+    1. K-line at lower band (short-term oversold)
     2. Volume contraction (< 60% of average volume)
     3. Lower band turning upwards
 
     Sell signals (all must be true):
-    1. K-line at upper band (overbought)
+    1. K-line at upper band (short-term overbought)
     2. Volume expansion (> 150% of average volume)
     3. Upper band turning downwards
 
@@ -58,7 +59,7 @@ class BollingerDailyStrategy(BaseStrategy):
         volume_ma_period: Volume moving average period (default: 5).
         volume_threshold_buy: Volume threshold for buy signals (default: 0.6 = 60%).
         volume_threshold_sell: Volume threshold for sell signals (default: 1.5 = 150%).
-        max_holding_days: Maximum holding period in days (default: 20).
+        max_holding_days: Maximum holding period in days (default: 3).
         band_tolerance: Price tolerance for band detection (default: 0.01 = 1%).
     """
 
@@ -68,13 +69,13 @@ class BollingerDailyStrategy(BaseStrategy):
         ("volume_ma_period", 5),  # Volume moving average period
         ("volume_threshold_buy", 0.6),  # Volume threshold for buy (60% of average)
         ("volume_threshold_sell", 1.5),  # Volume threshold for sell (150% of average)
-        ("max_holding_days", 20),  # Maximum holding period in days
+        ("max_holding_days", 3),  # Maximum holding period in days
         ("band_tolerance", 0.01),  # Price tolerance for band detection (1%)
     )
 
     def __init__(self):
         """
-        Initialize Daily Bollinger Bands Strategy.
+        Initialize 60-minute Bollinger Bands Strategy.
 
         Indicators are initialized here following backtrader's standard pattern.
         """
@@ -101,7 +102,7 @@ class BollingerDailyStrategy(BaseStrategy):
         self.entry_time = None  # Track entry time for holding period limit
 
         logger.info(
-            f"Daily Bollinger Bands Strategy initialized with "
+            f"60-minute Bollinger Bands Strategy initialized with "
             f"period={self.p.period}, devfactor={self.p.devfactor}, "
             f"max_holding_days={self.p.max_holding_days}"
         )
@@ -110,7 +111,7 @@ class BollingerDailyStrategy(BaseStrategy):
         """
         Called for each bar.
 
-        Trading logic based on daily Bollinger Bands:
+        Trading logic based on 60-minute Bollinger Bands:
         - Lower band buy signals with volume contraction
         - Upper band sell signals with volume expansion
         - Band turning direction detection

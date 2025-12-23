@@ -16,7 +16,7 @@ import argparse
 import logging
 
 from atm.config import load_config
-from atm.trading.strategy import (
+from atm.trading.strategies import (
     SMACrossStrategy,
     StrategyRunner,
     create_strategy_parser,

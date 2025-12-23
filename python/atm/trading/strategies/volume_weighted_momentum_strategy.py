@@ -34,7 +34,7 @@ from typing import Dict, Optional
 import backtrader as bt
 
 from atm.trading.indicators.volume_weighted_momentum import VolumeWeightedMomentum
-from atm.trading.strategy.base import BaseStrategy
+from atm.trading.strategies.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 

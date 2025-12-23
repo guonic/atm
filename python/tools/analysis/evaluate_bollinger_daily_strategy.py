@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from atm.analysis.backtest.common_args import create_base_parser
 from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategy.bollinger_daily_strategy import BollingerDailyStrategy
+from atm.trading.strategies.bollinger_daily_strategy import BollingerDailyStrategy
 
 # Configure logging
 logging.basicConfig(

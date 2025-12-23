@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from atm.analysis.backtest.common_args import create_base_parser
 from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategy.chip_peak_strategy import ChipPeakStrategy
+from atm.trading.strategies.chip_peak_strategy import ChipPeakStrategy
 
 # Configure logging
 logging.basicConfig(

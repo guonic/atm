@@ -35,7 +35,7 @@ from atm.trading.indicators.chip_peak import (
     ChipPeakPattern,
     DummyChipPeakIndicator,
 )
-from atm.trading.strategy.base import BaseStrategy
+from atm.trading.strategies.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 

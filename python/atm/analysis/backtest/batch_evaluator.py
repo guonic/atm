@@ -14,8 +14,8 @@ import pandas as pd
 
 from atm.config import DatabaseConfig
 from atm.trading.selector.fundamental_selector import FundamentalSelector
-from atm.trading.strategy.base import BaseStrategy
-from atm.trading.strategy.strategy_runner import StrategyRunner
+from atm.trading.strategies.base import BaseStrategy
+from atm.trading.strategies.strategy_runner import StrategyRunner
 
 from .base import BacktestResult
 from .evaluator import BacktestEvaluator

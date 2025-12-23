@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional, Type
 
 import pandas as pd
 
-from atm.trading.strategy.base import BaseStrategy
-from atm.trading.strategy.strategy_runner import StrategyRunner
+from atm.trading.strategies.base import BaseStrategy
+from atm.trading.strategies.strategy_runner import StrategyRunner
 from .base import BaseBacktester, BacktestResult
 
 logger = logging.getLogger(__name__)
