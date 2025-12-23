@@ -28,6 +28,7 @@ from atm.trading.strategies.obv_rsi_resonance_strategy import OBVRSIResonanceStr
 from atm.trading.strategies.cci_bull_launch_strategy import CCIBullLaunchStrategy
 from atm.trading.strategies.atr_dynamic_stop_strategy import ATRDynamicStopStrategy
 from atm.trading.strategies.cmf_resonance_strategy import CMFResonanceStrategy
+from atm.trading.strategies.holy_grail_strategy import HolyGrailStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -51,6 +52,7 @@ __all__ = [
     "CCIBullLaunchStrategy",
     "ATRDynamicStopStrategy",
     "CMFResonanceStrategy",
+    "HolyGrailStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",
