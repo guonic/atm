@@ -38,7 +38,7 @@ DEBUG - Skipping record with missing required fields: ts_code=, symbol=, name=
 - 外键约束失败
 
 **解决方案**：
-- 检查数据库连接：`./scripts/controller.sh storage status`
+- 检查数据库连接：`./scripts/atm storage status`
 - 查看数据库日志
 - 检查表结构和约束
 - 确认使用正确的同步模式（upsert/append）

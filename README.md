@@ -60,11 +60,11 @@ make install-hooks
 ```bash
 make storage-start
 # 或者
-./scripts/controller.sh storage start
+./scripts/atm storage start
 
 # 同步股票基础信息（覆盖模式）
 export TUSHARE_TOKEN=your_tushare_token
-./scripts/controller.sh sync stock-basic
+./scripts/atm sync stock-basic
 ```
 
 5. **构建项目**

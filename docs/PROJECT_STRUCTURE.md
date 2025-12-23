@@ -23,7 +23,7 @@ atm/
 │   └── config.test.yaml         # 测试环境配置
 │
 ├── scripts/                      # 脚本工具目录
-│   ├── controller.sh            # 主控制器脚本
+│   ├── atm                       # 主控制器脚本
 │   ├── storage_controller.sh    # 存储控制器
 │   ├── build.sh                 # 构建脚本
 │   └── deploy.sh                 # 部署脚本
