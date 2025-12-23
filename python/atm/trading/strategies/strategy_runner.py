@@ -12,8 +12,8 @@ from typing import Any, Dict, Optional, Type
 import backtrader as bt
 
 from atm.config import DatabaseConfig
-from atm.trading.strategy.data_feed import create_data_feed
-from atm.trading.strategy.base import BaseStrategy
+from atm.trading.strategies.data_feed import create_data_feed
+from atm.trading.strategies.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
