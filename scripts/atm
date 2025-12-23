@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# controller.sh - 主入口脚本，支持子命令插件机制
+# atm - 主入口脚本，支持子命令插件机制
 # 类似于 kubectl 的命令结构
 
 set -e
@@ -12,7 +12,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # 显示帮助信息
 show_help() {
     cat << EOF
-用法: controller.sh <command> [options]
+用法: atm <command> [options]
 
 命令:
   storage   管理数据库服务（TimescaleDB）
@@ -25,17 +25,23 @@ show_help() {
 
   sync      数据同步任务
             - stock-basic: 同步股票基础信息（覆盖模式）
+            - trading-calendar: 同步交易日历数据（覆盖模式）
+            - kline: 同步K线数据（追加模式）
+            - premarket: 同步股票盘前数据（股本情况）
 
   help      显示此帮助信息
 
 示例:
-  controller.sh storage start
-  controller.sh storage stop
-  controller.sh storage login
-  controller.sh storage psql
-  controller.sh sync stock-basic
-  controller.sh sync stock-basic --exchange SSE
-  controller.sh help
+  atm storage start
+  atm storage stop
+  atm storage login
+  atm storage psql
+  atm sync stock-basic
+  atm sync stock-basic --exchange SSE
+  atm sync trading-calendar
+  atm sync kline --type day
+  atm sync premarket --trade-date 20241222
+  atm help
 
 EOF
 }

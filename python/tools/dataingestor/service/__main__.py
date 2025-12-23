@@ -17,7 +17,7 @@ if __name__ == "__main__":
     print("This is a service module, not a standalone script.")
     print("Please use one of the following:")
     print("  1. python python/tools/dataingestor/sync_stock_basic.py --help")
-    print("  2. ./scripts/controller.sh sync stock-basic --help")
+    print("  2. ./scripts/atm sync stock-basic --help")
     print("  3. Import and use in your code:")
     print("     from tools.dataingestor import StockIngestorService")
     sys.exit(1)

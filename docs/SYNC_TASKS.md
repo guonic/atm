@@ -22,22 +22,22 @@
 
 ```bash
 # 同步所有已上市股票
-./scripts/controller.sh sync stock-basic
+./scripts/atm sync stock-basic
 
 # 同步指定交易所
-./scripts/controller.sh sync stock-basic --exchange SSE
+./scripts/atm sync stock-basic --exchange SSE
 
 # 同步所有状态（包括已退市）
-./scripts/controller.sh sync stock-basic --list-status ""
+./scripts/atm sync stock-basic --list-status ""
 
 # 自定义批次大小
-./scripts/controller.sh sync stock-basic --batch-size 200
+./scripts/atm sync stock-basic --batch-size 200
 
 # 不使用断点续传（重新开始）
-./scripts/controller.sh sync stock-basic --no-resume
+./scripts/atm sync stock-basic --no-resume
 
 # 使用数据库存储状态（多实例部署）
-./scripts/controller.sh sync stock-basic --use-db-state
+./scripts/atm sync stock-basic --use-db-state
 ```
 
 #### 方法 2: 直接使用 Python 脚本
@@ -149,7 +149,7 @@ ingestor.reset_task_state("stock_basic_sync_all_L")
 
 ```bash
 # 默认就是 upsert 模式
-./scripts/controller.sh sync stock-basic
+./scripts/atm sync stock-basic
 ```
 
 #### Append 模式（追加）
@@ -175,11 +175,11 @@ stats = ingestor.ingest_stock_basic(
 
 ```bash
 # 第一个实例
-./scripts/controller.sh sync stock-basic --task-name test_task &
+./scripts/atm sync stock-basic --task-name test_task &
 # 进程 ID: 12345
 
 # 第二个实例（会失败）
-./scripts/controller.sh sync stock-basic --task-name test_task
+./scripts/atm sync stock-basic --task-name test_task
 # Error: Task test_task is already running
 ```
 
@@ -207,11 +207,11 @@ stats = ingestor.ingest_stock_basic(
 
 ```bash
 # 第一次运行（处理到一半中断）
-./scripts/controller.sh sync stock-basic
+./scripts/atm sync stock-basic
 # ... 处理了 5000 条记录后中断
 
 # 第二次运行（从第 5000 条继续）
-./scripts/controller.sh sync stock-basic --resume
+./scripts/atm sync stock-basic --resume
 # 从上次停止的地方继续处理
 ```
 
@@ -232,7 +232,7 @@ if state and state.status == "running":
 #### 2. 数据库连接失败
 
 **检查**:
-- 数据库服务是否运行: `./scripts/controller.sh storage status`
+- 数据库服务是否运行: `./scripts/atm storage status`
 - 连接参数是否正确
 - 防火墙设置
 
@@ -275,7 +275,7 @@ if state and state.status == "running":
 crontab -e
 
 # 每天凌晨 2 点同步股票基础信息
-0 2 * * * cd /path/to/atm && ./scripts/controller.sh sync stock-basic >> /var/log/atm/sync_stock_basic.log 2>&1
+0 2 * * * cd /path/to/atm && ./scripts/atm sync stock-basic >> /var/log/atm/sync_stock_basic.log 2>&1
 ```
 
 #### 使用 systemd timer
@@ -291,7 +291,7 @@ Type=oneshot
 User=quant
 WorkingDirectory=/path/to/atm
 Environment="TUSHARE_TOKEN=your_token"
-ExecStart=/path/to/atm/scripts/controller.sh sync stock-basic
+ExecStart=/path/to/atm/scripts/atm sync stock-basic
 ```
 
 创建 `/etc/systemd/system/atm-sync-stock-basic.timer`:

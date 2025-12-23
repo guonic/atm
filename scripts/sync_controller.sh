@@ -21,6 +21,7 @@ Commands:
   stock-basic          Synchronize stock basic information (upsert mode)
   trading-calendar    Synchronize trading calendar data (upsert mode)
   kline               Synchronize K-line data for all stocks (append mode)
+  premarket           Synchronize stock premarket information (股本情况盘前数据)
   help                 Show this help message
 
 Examples:
@@ -42,6 +43,15 @@ Examples:
   # Sync weekly K-line data for SSE stocks only
   $0 kline --type week --exchange SSE
 
+  # Sync premarket data for a specific date
+  $0 premarket --trade-date 20241222
+
+  # Sync premarket data for a date range
+  $0 premarket --start-date 20240101 --end-date 20241231
+
+  # Sync premarket data for a specific stock
+  $0 premarket --ts-code 000001.SZ
+
   # Sync with custom batch size
   $0 stock-basic --batch-size 200
 
@@ -52,6 +62,7 @@ For detailed options, use:
   $0 stock-basic --help
   $0 trading-calendar --help
   $0 kline --help
+  $0 premarket --help
 EOF
 }
 
@@ -68,6 +79,10 @@ case "${1:-}" in
     kline)
         shift
         exec "$SCRIPT_DIR/sync_kline.sh" "$@"
+        ;;
+    premarket)
+        shift
+        exec "$SCRIPT_DIR/sync_premarket.sh" "$@"
         ;;
     help|--help|-h|"")
         show_usage

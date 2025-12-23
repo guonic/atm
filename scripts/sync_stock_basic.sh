@@ -102,7 +102,6 @@ ARGS=(
     --exchange "$EXCHANGE"
     --list-status "$LIST_STATUS"
     --batch-size "$BATCH_SIZE"
-    --mode upsert
 )
 
 if [ "$RESUME" = true ]; then

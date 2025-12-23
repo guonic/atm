@@ -142,27 +142,27 @@ docker-down:
 
 ## storage-start: 启动数据库服务
 storage-start:
-	@$(SCRIPTS_DIR)/controller.sh storage start
+	@$(SCRIPTS_DIR)/atm storage start
 
 ## storage-stop: 停止数据库服务
 storage-stop:
-	@$(SCRIPTS_DIR)/controller.sh storage stop
+	@$(SCRIPTS_DIR)/atm storage stop
 
 ## storage-status: 查看数据库状态
 storage-status:
-	@$(SCRIPTS_DIR)/controller.sh storage status
+	@$(SCRIPTS_DIR)/atm storage status
 
 ## storage-restart: 重启数据库服务
 storage-restart:
-	@$(SCRIPTS_DIR)/controller.sh storage restart
+	@$(SCRIPTS_DIR)/atm storage restart
 
 ## storage-login: 登录数据库
 storage-login:
-	@$(SCRIPTS_DIR)/controller.sh storage login
+	@$(SCRIPTS_DIR)/atm storage login
 
 ## storage-psql: 显示 psql 连接命令
 storage-psql:
-	@$(SCRIPTS_DIR)/controller.sh storage psql
+	@$(SCRIPTS_DIR)/atm storage psql
 
 ## format: 格式化代码
 format: format-python format-go format-cpp

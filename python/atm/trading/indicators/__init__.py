@@ -6,11 +6,13 @@ from atm.trading.indicators.chip_peak import (
     DummyChipPeakIndicator,
 )
 from atm.trading.indicators.hma import HullMovingAverage
+from atm.trading.indicators.volume_weighted_momentum import VolumeWeightedMomentum
 
 __all__ = [
     "ChipPeakIndicator",
     "ChipPeakPattern",
     "DummyChipPeakIndicator",
     "HullMovingAverage",
+    "VolumeWeightedMomentum",
 ]
 
