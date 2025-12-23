@@ -38,52 +38,40 @@ class SentimentZoneOscillator(bt.Indicator):
 
 class OnBalanceVolume(bt.Indicator):
     """
-    On-Balance Volume (OBV) Indicator.
+    On-Balance Volume (OBV) indicator.
 
-    OBV is a momentum indicator that uses volume flow to predict changes in stock price.
-    It accumulates volume on up days and subtracts volume on down days.
-
-    Calculation:
-    - If close > previous close: OBV = previous OBV + volume
-    - If close < previous close: OBV = previous OBV - volume
-    - If close = previous close: OBV = previous OBV
-
-    Parameters:
-        None
-
-    Lines:
-        obv: On-Balance Volume value.
-
-    Example:
-        obv = OnBalanceVolume(data)
+    Uses volume flow to gauge buying/selling pressure:
+    - Close up: add volume
+    - Close down: subtract volume
+    - Close unchanged: carry forward
     """
 
     lines = ("obv",)
     params = ()
 
     def __init__(self):
-        """Initialize On-Balance Volume indicator."""
+        """Initialize OBV and enforce minimum period."""
         super().__init__()
-        # Need at least 1 bar
         self.addminperiod(1)
 
     def next(self):
-        """Calculate OBV for current bar."""
+        """Compute OBV incrementally."""
         if len(self.data) == 1:
-            # First bar: start from current volume
+            # First bar initializes OBV with volume
             self.lines.obv[0] = self.data.volume[0]
             return
 
-        # Compare current close with previous close
-        if self.data.close[0] > self.data.close[-1]:
-            # Price up: add volume
-            self.lines.obv[0] = self.lines.obv[-1] + self.data.volume[0]
-        elif self.data.close[0] < self.data.close[-1]:
-            # Price down: subtract volume
-            self.lines.obv[0] = self.lines.obv[-1] - self.data.volume[0]
+        prev_obv = self.lines.obv[-1]
+        close_now = self.data.close[0]
+        close_prev = self.data.close[-1]
+        volume_now = self.data.volume[0]
+
+        if close_now > close_prev:
+            self.lines.obv[0] = prev_obv + volume_now
+        elif close_now < close_prev:
+            self.lines.obv[0] = prev_obv - volume_now
         else:
-            # Price unchanged: OBV stays the same
-            self.lines.obv[0] = self.lines.obv[-1]
+            self.lines.obv[0] = prev_obv
 
 class VolumeMovingAverage(bt.Indicator):
     """

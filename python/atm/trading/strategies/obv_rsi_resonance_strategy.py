@@ -22,6 +22,15 @@ Exit Signals:
 - RSI shows trend divergence (price up but RSI down) and breaks below middle range
 """
 
+"""
+OBV + RSI Resonance Strategy.
+
+Captures “capital + trend” synchronized signals:
+- OBV validates capital inflow; RSI validates trend sustainability.
+- Entry when both breakouts occur within a short window and hold supports.
+- Exit on capital/trend divergence or support break.
+"""
+
 import logging
 from typing import Optional
 
@@ -36,10 +45,11 @@ logger = logging.getLogger(__name__)
 
 class OBVRSIResonanceStrategy(BaseStrategy):
     """
-    OBV+RSI Dual Indicator Resonance Strategy.
+    OBV+RSI dual-indicator resonance strategy.
 
-    Combines OBV for capital flow tracking and RSI for trend strength calibration
-    to identify high-probability bull market opportunities.
+    - OBV: capital tracking (breakout above long MA + rising with volume)
+    - RSI: trend calibration (middle range, synchronized with price)
+    - Resonance: both signals occur within a short time window; pullback holds support
     """
 
     params = (
@@ -64,7 +74,7 @@ class OBVRSIResonanceStrategy(BaseStrategy):
         """Initialize OBV+RSI Resonance Strategy."""
         super().__init__()
 
-        # OBV indicator (custom implementation)
+        # OBV indicator (custom)
         self.obv = OnBalanceVolume(self.data)
         self.obv_long_ma = btind.SMA(self.obv, period=self.p.obv_long_ma_period)
         self.obv_short_ma = btind.SMA(self.obv, period=self.p.obv_short_ma_period)
