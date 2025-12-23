@@ -22,6 +22,7 @@ from atm.trading.strategies.improved_macd_strategy import ImprovedMACDStrategy
 from atm.trading.strategies.rsi_macd_resonance_strategy import RSIMACDResonanceStrategy
 from atm.trading.strategies.strategy_runner import StrategyRunner
 from atm.trading.strategies.sma_cross_strategy import SMACrossStrategy
+from atm.trading.strategies.dmi_strategy import DMIStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -39,6 +40,7 @@ __all__ = [
     "ImprovedMACDStrategy",
     "RSIMACDResonanceStrategy",
     "VolumeWeightedMomentumStrategy",
+    "DMIStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",
