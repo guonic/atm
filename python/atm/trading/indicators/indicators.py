@@ -1197,6 +1197,41 @@ class DMIStoch(bt.Indicator):
 
         self.lines.stoch = btind.SumN(osc - ll, period=self.p.sumperiod) / btind.SumN(hh - ll, period=self.p.sumperiod) * 100
 
+
+class DMIIndicator(bt.Indicator):
+    """
+    DMI (Directional Movement Index) composite indicator.
+
+    Wraps Backtrader's DirectionalMovementIndex and exposes +DI, -DI, ADX, and ADXR.
+    ADXR is computed as a simple average of the current and previous ADX values.
+
+    Parameters:
+        period (int): DMI calculation period (default: 14).
+
+    Lines:
+        plus_di: +DI line (rising strength)
+        minus_di: -DI line (falling strength)
+        adx: Trend strength line
+        adxr: Smoothed trend strength (average of current and previous ADX)
+    """
+
+    lines = ("plus_di", "minus_di", "adx", "adxr")
+    params = (("period", 14),)
+
+    def __init__(self):
+        super().__init__()
+
+        base = btind.DirectionalMovementIndex(self.data, period=self.p.period)
+
+        # Map underlying lines
+        self.lines.plus_di = base.plusDI
+        self.lines.minus_di = base.minusDI
+        self.lines.adx = base.adx
+
+        # ADXR: average of current and previous ADX (simple smoothing)
+        self.lines.adxr = btind.MovAv.Simple(base.adx, period=2)
+
+
 class ZackVolatility(bt.Indicator):
     """
     Zack Volatility indicator.
