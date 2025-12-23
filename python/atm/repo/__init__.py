@@ -2,6 +2,7 @@
 
 from atm.repo.base import BaseRepo, ConnectionError, RepoError, SaveError
 from atm.repo.database_repo import DatabaseRepo
+from atm.repo.backtest_repo import BacktestRepo
 from atm.repo.kline_repo import (
     StockKline15MinRepo,
     StockKline1MinRepo,
@@ -43,6 +44,8 @@ __all__ = [
     "RepoError",
     "ConnectionError",
     "SaveError",
+    # Backtest
+    "BacktestRepo",
     # Stock repositories
     "StockBasicRepo",
     "StockClassifyRepo",
@@ -66,12 +69,12 @@ __all__ = [
     "FileStateRepo",
     "DatabaseStateRepo",
     "IngestionState",
-        # Task locks
-        "BaseTaskLock",
-        "FileTaskLock",
-        "DatabaseTaskLock",
-        "TaskLockError",
-        # Trading calendar
-        "TradingCalendarRepo",
-    ]
+    # Task locks
+    "BaseTaskLock",
+    "FileTaskLock",
+    "DatabaseTaskLock",
+    "TaskLockError",
+    # Trading calendar
+    "TradingCalendarRepo",
+]
 

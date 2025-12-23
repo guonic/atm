@@ -7,7 +7,7 @@ broker configuration, and result reporting.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 import backtrader as bt
 
@@ -35,6 +35,8 @@ class StrategyRunner:
         initial_cash: float = 100000.0,
         commission: float = 0.001,
         slippage: float = 0.0,
+        run_id: Optional[str] = None,
+        ts_code: Optional[str] = None,
     ):
         """
         Initialize strategy runner.
@@ -44,13 +46,18 @@ class StrategyRunner:
             initial_cash: Initial cash amount (default: 100000.0).
             commission: Commission rate (default: 0.001 = 0.1%).
             slippage: Slippage rate (default: 0.0).
+            run_id: Backtest run ID for signal tracking (default: None).
+            ts_code: Stock code for signal tracking (default: None).
         """
         self.db_config = db_config
         self.initial_cash = initial_cash
         self.commission = commission
         self.slippage = slippage
+        self.run_id = run_id
+        self.ts_code = ts_code
         self.cerebro = bt.Cerebro()
         self._last_results: Optional[Any] = None
+        self._strategy_instance: Optional[BaseStrategy] = None
         self._setup_broker()
 
     def _setup_broker(self):
@@ -107,6 +114,12 @@ class StrategyRunner:
             strategy_class: Strategy class (must inherit from BaseStrategy).
             **strategy_params: Strategy parameters to pass to strategy.
         """
+        # Pass run_id and ts_code to strategy for signal collection
+        if self.run_id:
+            strategy_params["run_id"] = self.run_id
+        if self.ts_code:
+            strategy_params["ts_code"] = self.ts_code
+        
         self.cerebro.addstrategy(strategy_class, **strategy_params)
 
     def add_analyzers(self) -> None:
@@ -171,6 +184,22 @@ class StrategyRunner:
 
         # Use standard run mode to avoid array index issues with insufficient data
         results = self.cerebro.run(optreturn=optreturn)
+
+        # Store strategy instance for signal retrieval
+        # Try multiple ways to get the strategy instance
+        try:
+            # Method 1: From cerebro.runstrats (most reliable)
+            if hasattr(self.cerebro, 'runstrats') and self.cerebro.runstrats:
+                if len(self.cerebro.runstrats) > 0 and len(self.cerebro.runstrats[0]) > 0:
+                    self._strategy_instance = self.cerebro.runstrats[0][0]
+            # Method 2: From results (fallback)
+            elif results and len(results) > 0:
+                if isinstance(results[0], list) and len(results[0]) > 0:
+                    self._strategy_instance = results[0][0]
+                elif isinstance(results[0], BaseStrategy):
+                    self._strategy_instance = results[0]
+        except Exception as e:
+            logger.warning(f"Failed to get strategy instance for signal retrieval: {e}")
 
         logger.info(f"Final Portfolio Value: {self.cerebro.broker.getvalue():.2f}")
 
@@ -331,6 +360,17 @@ class StrategyRunner:
 
         return results
 
+    def get_signals(self) -> List[Dict[str, Any]]:
+        """
+        Get signals collected by the strategy instance.
+
+        Returns:
+            List of signal dictionaries, or empty list if no strategy instance or signals.
+        """
+        if self._strategy_instance is not None and hasattr(self._strategy_instance, "get_signals"):
+            return self._strategy_instance.get_signals()
+        return []
+
     @classmethod
     def run_strategy(
         cls,
@@ -346,6 +386,7 @@ class StrategyRunner:
         strategy_params: Optional[Dict[str, Any]] = None,
         add_analyzers: bool = True,
         kline_type: str = "day",
+        run_id: Optional[str] = None,
     ) -> "StrategyRunner":
         """
         Run a strategy with all necessary parameters in one call.
@@ -365,6 +406,7 @@ class StrategyRunner:
             strategy_params: Strategy parameters dictionary (default: None).
             add_analyzers: Whether to add analyzers (default: True).
             kline_type: K-line type (day, hour, 30min, 15min, 5min, 1min) (default: 'day').
+            run_id: Backtest run ID for signal tracking (default: None).
 
         Returns:
             StrategyRunner instance with results available via get_results() and get_analyzer_results().
@@ -374,6 +416,8 @@ class StrategyRunner:
             initial_cash=initial_cash,
             commission=commission,
             slippage=slippage,
+            run_id=run_id,
+            ts_code=ts_code,
         )
 
         runner.add_data(

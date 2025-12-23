@@ -5,9 +5,12 @@ Provides reusable evaluation functionality for all strategy evaluation scripts.
 """
 
 import logging
+import sys
+from datetime import datetime
 from typing import Any, Dict, Type
 
 from atm.config import DatabaseConfig, load_config
+from atm.repo.backtest_repo import BacktestRepo
 from atm.trading.strategies.base import BaseStrategy
 from .batch_evaluator import BatchStrategyEvaluator
 from .common_args import validate_dates
@@ -60,6 +63,21 @@ def run_strategy_evaluation(
         slippage=args.slippage,
     )
 
+    # Prepare backtest repo and run record
+    backtest_repo = BacktestRepo(db_config=db_config, schema=args.schema)
+    backtest_repo.ensure_tables()
+    run_params = vars(args).copy()
+    run_id = backtest_repo.insert_run(
+        strategy_name=strategy_name,
+        command=" ".join(sys.argv),
+        params=run_params,
+        kline_type=args.kline_type,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        start_time=datetime.utcnow(),
+        status="running",
+    )
+
     # Select stocks
     selected_stocks = evaluator.select_stocks(
         min_market_cap=args.min_market_cap,
@@ -98,7 +116,52 @@ def run_strategy_evaluation(
             strategy_params=strategy_params,
             add_analyzers=True,
             kline_type=args.kline_type,
+            run_id=run_id,
         )
+
+        # Persist results
+        if results:
+            rows = []
+            # Group signals by ts_code
+            signals_by_code = {}
+            total_signals = 0
+            
+            for r in results:
+                rows.append(
+                    {
+                        "ts_code": r.ts_code,
+                        "metrics": r.metrics,
+                        "stats": r.metadata,
+                    }
+                )
+                # Collect signals from metadata
+                if "signals" in r.metadata and r.metadata["signals"]:
+                    ts_code = r.ts_code
+                    if ts_code not in signals_by_code:
+                        signals_by_code[ts_code] = []
+                    signals_by_code[ts_code].extend(r.metadata["signals"])
+                    total_signals += len(r.metadata["signals"])
+            
+            backtest_repo.insert_results(run_id, rows)
+            
+            # Save signals grouped by ts_code
+            if signals_by_code:
+                for ts_code, signals in signals_by_code.items():
+                    signal_records = [
+                        {
+                            "signal_time": s.get("signal_time"),
+                            "signal_type": s.get("signal_type"),
+                            "price": s.get("price"),
+                            "size": s.get("size"),
+                            "extra": s.get("extra", {}),
+                        }
+                        for s in signals
+                    ]
+                    backtest_repo.insert_signals(run_id, ts_code, signal_records)
+                
+                logger.info(f"Saved {total_signals} signals for {len(signals_by_code)} stocks")
+        
+        backtest_repo.update_run_status(run_id, status="success", end_time=datetime.utcnow())
 
         # Generate report
         evaluator.generate_summary_report(
@@ -113,8 +176,10 @@ def run_strategy_evaluation(
 
     except KeyboardInterrupt:
         logger.warning("Evaluation interrupted by user")
+        backtest_repo.update_run_status(run_id, status="failed", end_time=datetime.utcnow())
         return 130
     except Exception as e:
         logger.error(f"Evaluation failed: {e}", exc_info=True)
+        backtest_repo.update_run_status(run_id, status="failed", end_time=datetime.utcnow())
         return 1
 
