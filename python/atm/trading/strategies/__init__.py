@@ -30,6 +30,7 @@ from atm.trading.strategies.atr_dynamic_stop_strategy import ATRDynamicStopStrat
 from atm.trading.strategies.cmf_resonance_strategy import CMFResonanceStrategy
 from atm.trading.strategies.macd_obv_resonance_strategy import MACDOBVResonanceStrategy
 from atm.trading.strategies.holy_grail_strategy import HolyGrailStrategy
+from atm.trading.strategies.triple_ma_135_strategy import TripleMA135Strategy
 
 __all__ = [
     "BaseStrategy",
@@ -55,6 +56,7 @@ __all__ = [
     "CMFResonanceStrategy",
     "MACDOBVResonanceStrategy",
     "HolyGrailStrategy",
+    "TripleMA135Strategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",
