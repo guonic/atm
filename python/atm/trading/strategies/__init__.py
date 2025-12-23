@@ -31,6 +31,7 @@ from atm.trading.strategies.cmf_resonance_strategy import CMFResonanceStrategy
 from atm.trading.strategies.macd_obv_resonance_strategy import MACDOBVResonanceStrategy
 from atm.trading.strategies.holy_grail_strategy import HolyGrailStrategy
 from atm.trading.strategies.triple_ma_135_strategy import TripleMA135Strategy
+from atm.trading.strategies.rsi_multi_signal_strategy import RSIMultiSignalStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -57,6 +58,7 @@ __all__ = [
     "MACDOBVResonanceStrategy",
     "HolyGrailStrategy",
     "TripleMA135Strategy",
+    "RSIMultiSignalStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",
