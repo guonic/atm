@@ -27,6 +27,7 @@ from atm.trading.strategies.price_entropy_strategy import PriceEntropyStrategy
 from atm.trading.strategies.obv_rsi_resonance_strategy import OBVRSIResonanceStrategy
 from atm.trading.strategies.cci_bull_launch_strategy import CCIBullLaunchStrategy
 from atm.trading.strategies.atr_dynamic_stop_strategy import ATRDynamicStopStrategy
+from atm.trading.strategies.cmf_resonance_strategy import CMFResonanceStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -49,6 +50,7 @@ __all__ = [
     "OBVRSIResonanceStrategy",
     "CCIBullLaunchStrategy",
     "ATRDynamicStopStrategy",
+    "CMFResonanceStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",

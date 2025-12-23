@@ -73,6 +73,32 @@ class OnBalanceVolume(bt.Indicator):
         else:
             self.lines.obv[0] = prev_obv
 
+class ChaikinMoneyFlow(bt.Indicator):
+    """
+    Chaikin Money Flow (CMF) indicator.
+
+    Measures buying/selling pressure by weighting volume with the close's
+    location within the high-low range.
+    """
+
+    lines = ("cmf",)
+    params = (("period", 20),)
+
+    def __init__(self):
+        """Initialize CMF components."""
+        super().__init__()
+        hl_range = bt.If(
+            self.data.high - self.data.low == 0,
+            1e-8,
+            self.data.high - self.data.low,
+        )
+        mfm = ((self.data.close - self.data.low) - (self.data.high - self.data.close)) / hl_range
+        mfv = mfm * self.data.volume
+        vol_sum = btind.SumN(self.data.volume, period=self.p.period)
+        mfv_sum = btind.SumN(mfv, period=self.p.period)
+        self.lines.cmf = mfv_sum / bt.If(vol_sum == 0, 1e-8, vol_sum)
+
+
 class VolumeMovingAverage(bt.Indicator):
     """
     Volume Weighted Moving Average indicator.
