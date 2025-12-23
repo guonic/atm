@@ -2,8 +2,10 @@
 """
 Stock premarket information synchronization task.
 
-Synchronizes stock premarket information (股本情况盘前数据) from Tushare to database.
-Reference: https://tushare.pro/document/2?doc_id=329
+Synchronizes stock premarket information (股本情况盘前数据) from Tushare or AkShare to database.
+Reference:
+- Tushare: https://tushare.pro/document/2?doc_id=329
+- AkShare: https://akshare.akfamily.xyz/
 """
 
 import argparse
@@ -99,10 +101,17 @@ def main():
         help="Use database for state storage instead of files",
     )
     parser.add_argument(
+        "--source",
+        type=str,
+        default="akshare",
+        choices=["tushare", "akshare"],
+        help="Data source type: 'tushare' or 'akshare' (default: akshare)",
+    )
+    parser.add_argument(
         "--tushare-token",
         type=str,
         default=None,
-        help="Tushare Pro API token (overrides config and env var)",
+        help="Tushare Pro API token (required if --source is 'tushare', overrides config and env var)",
     )
 
     args = parser.parse_args()
@@ -132,11 +141,13 @@ def main():
             schema=os.getenv("DB_SCHEMA", "quant"),
         )
 
-    # Get Tushare token
-    tushare_token = args.tushare_token or os.getenv("TUSHARE_TOKEN", "")
-    if not tushare_token:
-        logger.error("Tushare token is required. Set TUSHARE_TOKEN environment variable or use --tushare-token")
-        sys.exit(1)
+    # Get Tushare token (only required if source is tushare)
+    tushare_token = None
+    if args.source == "tushare":
+        tushare_token = args.tushare_token or os.getenv("TUSHARE_TOKEN", "")
+        if not tushare_token:
+            logger.error("Tushare token is required when --source is 'tushare'. Set TUSHARE_TOKEN environment variable or use --tushare-token")
+            sys.exit(1)
 
     # Create state repository
     if args.use_db_state:
@@ -162,6 +173,7 @@ def main():
     logger.info("Stock Premarket Information Synchronization Task")
     logger.info("=" * 80)
     logger.info(f"Task Name: {task_name}")
+    logger.info(f"Data Source: {args.source.upper()}")
     logger.info(f"Trade Date: {args.trade_date or 'N/A'}")
     logger.info(f"Date Range: {args.start_date or 'N/A'} to {args.end_date or 'N/A'}")
     logger.info(f"Stock Code: {args.ts_code or 'All'}")
@@ -175,6 +187,7 @@ def main():
         with PremarketSyncService(
             db_config=db_config,
             tushare_token=tushare_token,
+            source_type=args.source,
             state_repo=state_repo,
         ) as service:
             # Start synchronization
