@@ -24,6 +24,7 @@ from atm.trading.strategies.strategy_runner import StrategyRunner
 from atm.trading.strategies.sma_cross_strategy import SMACrossStrategy
 from atm.trading.strategies.dmi_strategy import DMIStrategy
 from atm.trading.strategies.price_entropy_strategy import PriceEntropyStrategy
+from atm.trading.strategies.cci_bull_launch_strategy import CCIBullLaunchStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -43,6 +44,7 @@ __all__ = [
     "VolumeWeightedMomentumStrategy",
     "DMIStrategy",
     "PriceEntropyStrategy",
+    "CCIBullLaunchStrategy",
     "create_strategy_parser",
     "parse_date_args",
     "parse_strategy_args",

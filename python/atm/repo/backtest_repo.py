@@ -179,8 +179,8 @@ class BacktestRepo:
             {
                 "run_id": run_id,
                 "ts_code": r.get("ts_code"),
-                "metrics": json.dumps(r.get("metrics", {})),
-                "stats": json.dumps(r.get("stats", {})),
+                "metrics": json.dumps(r.get("metrics", {}), default=self._json_default),
+                "stats": json.dumps(r.get("stats", {}), default=self._json_default),
             }
             for r in results
         ]
@@ -194,6 +194,13 @@ class BacktestRepo:
         with engine.begin() as conn:
             conn.execute(sql, rows)
         return len(rows)
+
+    @staticmethod
+    def _json_default(obj: Any):
+        """Fallback JSON serializer."""
+        if isinstance(obj, (datetime,)):
+            return obj.isoformat()
+        return str(obj)
 
     def insert_signals(
         self, run_id: str, ts_code: str, signals: List[Dict[str, Any]]
