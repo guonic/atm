@@ -65,12 +65,6 @@ class ChipPeakIndicator(bt.Indicator):
     def __init__(self):
         """Initialize chip peak indicator."""
         super().__init__()
-        # Initialize with default values
-        self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
-        self.lines.upper_edge[0] = 0.0
-        self.lines.lower_edge[0] = 0.0
-        self.lines.main_cost[0] = 0.0
-        self.lines.peak_sharpness[0] = 0.0
 
     def next(self):
         """
@@ -80,11 +74,17 @@ class ChipPeakIndicator(bt.Indicator):
         the actual chip peak calculation logic.
         """
         # Default implementation: set to unknown
-        self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
-        self.lines.upper_edge[0] = self.data.close[0]
-        self.lines.lower_edge[0] = self.data.close[0]
-        self.lines.main_cost[0] = self.data.close[0]
-        self.lines.peak_sharpness[0] = 0.0
+        # Use try-except to handle cases where data is not ready yet
+        try:
+            if len(self.data) > 0:
+                self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
+                self.lines.upper_edge[0] = self.data.close[0]
+                self.lines.lower_edge[0] = self.data.close[0]
+                self.lines.main_cost[0] = self.data.close[0]
+                self.lines.peak_sharpness[0] = 0.0
+        except (IndexError, TypeError):
+            # Data not ready yet, will try again next bar
+            pass
 
     def get_pattern(self) -> ChipPeakPattern:
         """
@@ -208,23 +208,36 @@ class DummyChipPeakIndicator(ChipPeakIndicator):
         - Sets main cost to current close price
         """
         try:
+            # Check if we have enough data
+            if len(self.data) == 0:
+                return
+            
             # Use recent price range as dummy chip peak edges
             lookback = min(self.p.lookback_period, len(self.data))
             if lookback > 0:
-                prices = [self.data.close[-i] for i in range(lookback)]
-                price_high = max(prices)
-                price_low = min(prices)
-                price_range = price_high - price_low
+                try:
+                    prices = [self.data.close[-i] for i in range(lookback)]
+                    price_high = max(prices)
+                    price_low = min(prices)
+                    price_range = price_high - price_low
 
-                # Set pattern to single peak (for testing)
-                self.lines.pattern[0] = ChipPeakPattern.SINGLE_PEAK.value
+                    # Set pattern to single peak (for testing)
+                    self.lines.pattern[0] = ChipPeakPattern.SINGLE_PEAK.value
 
-                # Set edges based on price range
-                current_price = self.data.close[0]
-                self.lines.upper_edge[0] = current_price + price_range * 0.1
-                self.lines.lower_edge[0] = current_price - price_range * 0.1
-                self.lines.main_cost[0] = current_price
-                self.lines.peak_sharpness[0] = 0.5  # Medium sharpness
+                    # Set edges based on price range
+                    current_price = self.data.close[0]
+                    self.lines.upper_edge[0] = current_price + price_range * 0.1
+                    self.lines.lower_edge[0] = current_price - price_range * 0.1
+                    self.lines.main_cost[0] = current_price
+                    self.lines.peak_sharpness[0] = 0.5  # Medium sharpness
+                except (IndexError, TypeError, ValueError):
+                    # Fallback to current price if lookback fails
+                    current_price = self.data.close[0]
+                    self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
+                    self.lines.upper_edge[0] = current_price
+                    self.lines.lower_edge[0] = current_price
+                    self.lines.main_cost[0] = current_price
+                    self.lines.peak_sharpness[0] = 0.0
             else:
                 # Not enough data
                 current_price = self.data.close[0]
@@ -235,11 +248,16 @@ class DummyChipPeakIndicator(ChipPeakIndicator):
                 self.lines.peak_sharpness[0] = 0.0
         except (IndexError, TypeError, ValueError) as e:
             logger.debug(f"Error in DummyChipPeakIndicator.next(): {e}")
-            # Fallback to current price
-            current_price = self.data.close[0]
-            self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
-            self.lines.upper_edge[0] = current_price
-            self.lines.lower_edge[0] = current_price
-            self.lines.main_cost[0] = current_price
-            self.lines.peak_sharpness[0] = 0.0
+            # If all else fails, try to set defaults safely
+            try:
+                if len(self.data) > 0:
+                    current_price = self.data.close[0]
+                    self.lines.pattern[0] = ChipPeakPattern.UNKNOWN.value
+                    self.lines.upper_edge[0] = current_price
+                    self.lines.lower_edge[0] = current_price
+                    self.lines.main_cost[0] = current_price
+                    self.lines.peak_sharpness[0] = 0.0
+            except (IndexError, TypeError, ValueError):
+                # Data not ready yet, will try again next bar
+                pass
 

@@ -15,7 +15,7 @@
 - `docker/` - Docker 配置文件
 - `storage/` - 数据存储目录
 - `trading/` - 交易业务逻辑
-- `docs/` - 文档目录
+- `docs/` - 文档目录（使用中文或英文编写）
 - `tools/` - 开发工具
 - `build/` - 构建输出（gitignore）
 - `dist/` - 发布包（gitignore）
