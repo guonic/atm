@@ -114,3 +114,7 @@ storage/locks/*.lock
 
 # outputs
 outputs/
+
+# qlib test data
+python/tests/qlib/Users/
+python/tests/qlib/mlruns/
