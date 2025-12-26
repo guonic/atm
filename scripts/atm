@@ -28,6 +28,8 @@ show_help() {
             - trading-calendar: 同步交易日历数据（覆盖模式）
             - kline: 同步K线数据（追加模式）
             - premarket: 同步股票盘前数据（股本情况）
+            - industry-classify: 同步申万行业分类
+            - industry-member: 同步申万行业成分
 
   export-qlib 导出数据到 Qlib 格式
             - day: 导出日线数据
@@ -52,6 +54,8 @@ show_help() {
   atm sync trading-calendar
   atm sync kline --type day
   atm sync premarket --trade-date 20241222
+  atm sync industry-classify --src SW2021
+  atm sync industry-member
   atm export-qlib day
   atm export-qlib day --stocks 000001.SZ 000002.SZ
   atm export-qlib day --incremental
