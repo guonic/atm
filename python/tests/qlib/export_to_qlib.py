@@ -172,6 +172,16 @@ def export_daily_data_to_csv(
             qlib_df["low"] = pd.to_numeric(df["low"], errors="coerce")
             qlib_df["close"] = pd.to_numeric(df["close"], errors="coerce")
             qlib_df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype(int)
+            
+            # Add factor field (复权因子) - default to 1.0 if not available
+            # If adj_factor or factor exists in source data, use it; otherwise default to 1.0
+            if "adj_factor" in df.columns:
+                qlib_df["factor"] = pd.to_numeric(df["adj_factor"], errors="coerce").fillna(1.0)
+            elif "factor" in df.columns:
+                qlib_df["factor"] = pd.to_numeric(df["factor"], errors="coerce").fillna(1.0)
+            else:
+                # Default factor is 1.0 (no adjustment)
+                qlib_df["factor"] = 1.0
 
             # Remove rows with missing price data
             qlib_df = qlib_df.dropna(subset=["open", "high", "low", "close"])
@@ -187,8 +197,11 @@ def export_daily_data_to_csv(
             # Convert ts_code to Qlib format
             qlib_code = convert_ts_code_to_qlib_format(stock.ts_code)
 
-            # Save to CSV
+            # Save to CSV (ensure column order: date, open, high, low, close, volume, factor)
             csv_file = output_dir / f"{qlib_code}.csv"
+            # Reorder columns to ensure correct format
+            column_order = ["date", "open", "high", "low", "close", "volume", "factor"]
+            qlib_df = qlib_df[column_order]
             qlib_df.to_csv(csv_file, index=False, header=False)
 
             exported_count += 1
@@ -214,6 +227,48 @@ def export_daily_data_to_csv(
         f"Export completed: {exported_count} stocks exported, {failed_count} failed"
     )
     return exported_count
+
+
+def fix_calendar_format(qlib_dir: Path, freq: str = "day") -> None:
+    """
+    Fix calendar file format from YYYY-MM-DD to YYYYMMDD (Qlib standard format).
+    
+    Args:
+        qlib_dir: Qlib data directory.
+        freq: Frequency ('day', '1min', etc.).
+    """
+    if freq != "day":
+        return  # Only fix day frequency
+    
+    calendar_file = qlib_dir / "calendars" / f"{freq}.txt"
+    if not calendar_file.exists():
+        return
+    
+    try:
+        with open(calendar_file, "r", encoding="utf-8") as f:
+            dates = [line.strip() for line in f if line.strip()]
+
+        # Convert YYYY-MM-DD to YYYYMMDD
+        converted_dates = []
+        for date_str in dates:
+            try:
+                # Try parsing as YYYY-MM-DD first
+                dt = pd.to_datetime(date_str)
+                converted_dates.append(dt.strftime("%Y%m%d"))
+            except (ValueError, TypeError):
+                # If already in YYYYMMDD format, keep it
+                if len(date_str) == 8 and date_str.isdigit():
+                    converted_dates.append(date_str)
+                # Otherwise skip invalid format
+
+        # Write back in correct format
+        if converted_dates:
+            with open(calendar_file, "w", encoding="utf-8") as f:
+                f.write("\n".join(converted_dates))
+                f.write("\n")
+            logger.debug(f"Fixed calendar format: {len(converted_dates)} dates converted to YYYYMMDD")
+    except Exception as e:
+        logger.warning(f"Failed to fix calendar format: {e}")
 
 
 def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") -> bool:
@@ -273,7 +328,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     dump_all_func(
                         csv_path=str(csv_dir),
                         qlib_dir=str(qlib_dir),
-                        include_fields="open,close,high,low,volume",
+                        include_fields="open,close,high,low,volume,factor",
                         freq=freq,
                         max_workers=4,
                     )
@@ -293,7 +348,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     if "qlib_dir" in params:
                         kwargs["qlib_dir"] = str(qlib_dir)
                     if "include_fields" in params:
-                        kwargs["include_fields"] = "open,close,high,low,volume"
+                        kwargs["include_fields"] = "open,close,high,low,volume,factor"
                     if "freq" in params:
                         kwargs["freq"] = freq
                     if "max_workers" in params:
@@ -302,6 +357,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     dump_all_func(**kwargs)
 
                 logger.info("✓ Successfully converted using qlib.tools.dump_bin.dump_all()")
+                fix_calendar_format(qlib_dir, freq)
                 logger.info(f"Qlib data directory: {qlib_dir}")
                 return True
             else:
@@ -324,7 +380,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     "dump_all",
                     "--csv_path", str(csv_dir),
                     "--qlib_dir", str(qlib_dir),
-                    "--include_fields", "open,close,high,low,volume",
+                    "--include_fields", "open,close,high,low,volume,factor",
                     "--freq", freq,
                 ],
                 # Format 2: python -m qlib.tools.dump_bin --csv_path ... (without dump_all)
@@ -334,7 +390,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     "qlib.tools.dump_bin",
                     "--csv_path", str(csv_dir),
                     "--qlib_dir", str(qlib_dir),
-                    "--include_fields", "open,close,high,low,volume",
+                    "--include_fields", "open,close,high,low,volume,factor",
                     "--freq", freq,
                 ],
             ]
@@ -351,6 +407,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
 
                 if result.returncode == 0:
                     logger.info("✓ Successfully converted using qlib CLI")
+                    fix_calendar_format(qlib_dir, freq)
                     logger.info(f"Qlib data directory: {qlib_dir}")
                     if result.stdout:
                         logger.debug(f"Output: {result.stdout[:500]}")  # First 500 chars
@@ -422,7 +479,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                         "dump_all",
                         "--csv_path", str(csv_dir),
                         "--qlib_dir", str(qlib_dir),
-                        "--include_fields", "open,close,high,low,volume",
+                        "--include_fields", "open,close,high,low,volume,factor",
                         "--freq", freq,
                     ],
                     [
@@ -430,7 +487,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                         str(dump_bin_script),
                         "--csv_path", str(csv_dir),
                         "--qlib_dir", str(qlib_dir),
-                        "--include_fields", "open,close,high,low,volume",
+                        "--include_fields", "open,close,high,low,volume,factor",
                         "--freq", freq,
                     ],
                 ]
@@ -447,6 +504,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
 
                     if result.returncode == 0:
                         logger.info("✓ Successfully converted using dump_bin.py script")
+                        fix_calendar_format(qlib_dir, freq)
                         logger.info(f"Qlib data directory: {qlib_dir}")
                         return True
                     else:
@@ -565,7 +623,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
 
                     # Save each field as a bin file
                     # Qlib expects float32 arrays aligned with calendar
-                    for field in ["open", "close", "high", "low", "volume"]:
+                    for field in ["open", "close", "high", "low", "volume", "factor"]:
                         field_file = feature_dir / f"{field}.{freq}.bin"
                         # Convert to numpy array, handle NaN values
                         values = df_aligned[field].values.astype("float32")
@@ -587,6 +645,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str = "day") ->
                     continue
 
             logger.info(f"Successfully converted {processed} CSV files to Qlib bin format")
+            fix_calendar_format(qlib_dir, freq)
             logger.info(f"Qlib data directory: {qlib_dir}")
             return True
 

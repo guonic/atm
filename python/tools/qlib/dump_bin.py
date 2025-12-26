@@ -168,6 +168,25 @@ class DumpDataBase:
 
     def _get_source_data(self, file_path: Path) -> pd.DataFrame:
         df = read_as_df(file_path, low_memory=False)
+        # If CSV has no header and date_field_name not in columns, assume standard Qlib format
+        if self.date_field_name not in df.columns.tolist():
+            # Check if first row looks like a date (YYYY-MM-DD format)
+            first_val = str(df.iloc[0, 0]) if not df.empty else ""
+            if len(first_val) == 10 and first_val.count("-") == 2:
+                # CSV has no header, assign standard Qlib column names
+                # Qlib standard format requires 7 columns: date, open, high, low, close, volume, factor
+                expected_cols = ["date", "open", "high", "low", "close", "volume", "factor"]
+                if len(df.columns) == len(expected_cols):
+                    df.columns = expected_cols
+                elif len(df.columns) > len(expected_cols):
+                    df.columns = expected_cols + [f"col_{i}" for i in range(len(expected_cols), len(df.columns))]
+                else:
+                    # Not enough columns - this is an error
+                    raise ValueError(
+                        f"CSV file has {len(df.columns)} columns, but Qlib format requires 7 columns: "
+                        f"date, open, high, low, close, volume, factor. "
+                        f"Please regenerate CSV files with factor column."
+                    )
         if self.date_field_name in df.columns:
             df[self.date_field_name] = pd.to_datetime(df[self.date_field_name])
         # df.drop_duplicates([self.date_field_name], inplace=True)
@@ -254,6 +273,15 @@ class DumpDataBase:
         if _df.empty:
             logger.warning(f"{features_dir.name} data is not in calendars")
             return
+        
+        # Verify factor field exists (required by Qlib standard format)
+        if "factor" not in _df.columns:
+            raise ValueError(
+                f"Factor field is missing in {features_dir.name} data. "
+                f"Qlib standard format requires factor column. "
+                f"Please regenerate CSV files with factor column."
+            )
+        
         # used when creating a bin file
         date_index = self.get_datetime_index(_df, calendar_list)
         for field in self.get_dump_fields(_df.columns):
