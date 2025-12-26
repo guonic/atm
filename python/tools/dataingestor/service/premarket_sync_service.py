@@ -17,12 +17,12 @@ _project_root = Path(__file__).parent.parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from atm.config import DatabaseConfig
-from atm.data.source import TushareSource, TushareSourceConfig
-from atm.data.source.akshare_source import AkshareSource, AkshareSourceConfig
+from nq.config import DatabaseConfig
+from nq.data.source import TushareSource, TushareSourceConfig
+from nq.data.source.akshare_source import AkshareSource, AkshareSourceConfig
 
-from atm.models.stock import StockPremarket
-from atm.repo import (
+from nq.models.stock import StockPremarket
+from nq.repo import (
     BaseStateRepo,
     BaseTaskLock,
     DatabaseStateRepo,

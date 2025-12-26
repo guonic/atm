@@ -21,8 +21,8 @@ import pandas as pd
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from atm.config import DatabaseConfig, load_config
-from atm.repo.kline_repo import (
+from nq.config import DatabaseConfig, load_config
+from nq.repo.kline_repo import (
     StockKlineDayRepo,
     StockKlineWeekRepo,
     StockKlineMonthRepo,
@@ -33,7 +33,7 @@ from atm.repo.kline_repo import (
     StockKline5MinRepo,
     StockKline1MinRepo,
 )
-from atm.repo.stock_repo import StockBasicRepo
+from nq.repo.stock_repo import StockBasicRepo
 
 # Import dump_bin tool
 tools_qlib_dir = Path(__file__).parent

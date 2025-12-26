@@ -12,9 +12,9 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from atm.analysis.backtest.common_args import create_base_parser
-from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategies.hma_strategy import HMAStrategy
+from nq.analysis.backtest.common_args import create_base_parser
+from nq.analysis.backtest.evaluation_runner import run_strategy_evaluation
+from nq.trading.strategies.hma_strategy import HMAStrategy
 
 # Configure logging
 logging.basicConfig(

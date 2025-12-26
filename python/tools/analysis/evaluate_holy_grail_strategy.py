@@ -5,9 +5,9 @@ import logging
 import sys
 from typing import Any, Dict
 
-from atm.analysis.backtest.common_args import create_base_parser
-from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategies.holy_grail_strategy import HolyGrailStrategy
+from nq.analysis.backtest.common_args import create_base_parser
+from nq.analysis.backtest.evaluation_runner import run_strategy_evaluation
+from nq.trading.strategies.holy_grail_strategy import HolyGrailStrategy
 
 logging.basicConfig(
     level=logging.INFO,

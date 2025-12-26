@@ -16,9 +16,9 @@ from typing import Dict, Optional
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from atm.config import DatabaseConfig, load_config
-from atm.models.stock import StockKlineSyncState
-from atm.repo import (
+from nq.config import DatabaseConfig, load_config
+from nq.models.stock import StockKlineSyncState
+from nq.repo import (
     StockBasicRepo,
     StockKline15MinRepo,
     StockKline1MinRepo,

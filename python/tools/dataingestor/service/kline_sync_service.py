@@ -20,9 +20,9 @@ _project_root = Path(__file__).parent.parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from atm.config import DatabaseConfig
-from atm.data.source import TushareSource, TushareSourceConfig
-from atm.models.kline import (
+from nq.config import DatabaseConfig
+from nq.data.source import TushareSource, TushareSourceConfig
+from nq.models.kline import (
     StockKline15Min,
     StockKline1Min,
     StockKline30Min,
@@ -33,8 +33,8 @@ from atm.models.kline import (
     StockKlineQuarter,
     StockKlineWeek,
 )
-from atm.models.stock import StockKlineSyncState
-from atm.repo import (
+from nq.models.stock import StockKlineSyncState
+from nq.repo import (
     BaseStateRepo,
     BaseTaskLock,
     DatabaseStateRepo,

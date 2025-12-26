@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-from atm.analysis.backtest.common_args import create_base_parser
-from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategies.cci_bull_launch_strategy import CCIBullLaunchStrategy
+from nq.analysis.backtest.common_args import create_base_parser
+from nq.analysis.backtest.evaluation_runner import run_strategy_evaluation
+from nq.trading.strategies.cci_bull_launch_strategy import CCIBullLaunchStrategy
 
 logging.basicConfig(
     level=logging.INFO,
