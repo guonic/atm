@@ -29,6 +29,17 @@ show_help() {
             - kline: 同步K线数据（追加模式）
             - premarket: 同步股票盘前数据（股本情况）
 
+  export-qlib 导出数据到 Qlib 格式
+            - day: 导出日线数据
+            - week: 导出周线数据
+            - month: 导出月线数据
+            - quarter: 导出季线数据
+            - hour: 导出小时数据
+            - 30min: 导出30分钟数据
+            - 15min: 导出15分钟数据
+            - 5min: 导出5分钟数据
+            - 1min: 导出1分钟数据
+
   help      显示此帮助信息
 
 示例:
@@ -41,6 +52,9 @@ show_help() {
   atm sync trading-calendar
   atm sync kline --type day
   atm sync premarket --trade-date 20241222
+  atm export-qlib day
+  atm export-qlib day --stocks 000001.SZ 000002.SZ
+  atm export-qlib day --incremental
   atm help
 
 EOF
@@ -65,6 +79,14 @@ execute_subcommand() {
                 "$SCRIPT_DIR/sync_controller.sh" "$@"
             else
                 echo "错误: 找不到 sync_controller.sh 脚本"
+                exit 1
+            fi
+            ;;
+        export-qlib)
+            if [ -f "$SCRIPT_DIR/export_qlib.sh" ]; then
+                "$SCRIPT_DIR/export_qlib.sh" "$@"
+            else
+                echo "错误: 找不到 export_qlib.sh 脚本"
                 exit 1
             fi
             ;;
