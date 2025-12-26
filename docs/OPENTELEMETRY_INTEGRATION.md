@@ -2,7 +2,7 @@
 
 ## 概述
 
-ATM 项目已全面集成 OpenTelemetry，支持 Python、Golang、C++ 三语言，提供统一的日志、指标和追踪能力。
+NexusQuant 项目已全面集成 OpenTelemetry，支持 Python、Golang、C++ 三语言，提供统一的日志、指标和追踪能力。
 
 ## 关键特性
 
@@ -40,30 +40,30 @@ go get go.opentelemetry.io/otel/sdk@latest
 
 ```bash
 # 启用 OpenTelemetry
-export ATM_OTEL_ENABLED=true
+export NQ_OTEL_ENABLED=true
 
 # OpenTelemetry Collector 地址
-export ATM_OTEL_ENDPOINT=localhost:4317
+export NQ_OTEL_ENDPOINT=localhost:4317
 
 # 服务信息
-export ATM_SERVICE_NAME=atm-api
-export ATM_SERVICE_VERSION=0.1.0
-export ATM_ENVIRONMENT=development
+export NQ_SERVICE_NAME=nexusquant-api
+export NQ_SERVICE_VERSION=0.1.0
+export NQ_ENVIRONMENT=development
 
 # 功能开关（可选）
-export ATM_OTEL_LOGS_ENABLED=true
-export ATM_OTEL_METRICS_ENABLED=true
-export ATM_OTEL_TRACES_ENABLED=true
+export NQ_OTEL_LOGS_ENABLED=true
+export NQ_OTEL_METRICS_ENABLED=true
+export NQ_OTEL_TRACES_ENABLED=true
 
 # 采样率（0.0 到 1.0）
-export ATM_OTEL_TRACE_SAMPLING=1.0
+export NQ_OTEL_TRACE_SAMPLING=1.0
 ```
 
 ### 3. 初始化（各语言）
 
 #### Python
 ```python
-from atm.utils.otel import initialize_otel
+from nq.utils.otel import initialize_otel
 
 # 在应用启动时初始化
 initialize_otel()
@@ -96,19 +96,19 @@ func main() {
 
 #### C++
 ```cpp
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 
 int main() {
     // 初始化
-    auto config = atm::utils::otel::LoadConfig();
-    if (!atm::utils::otel::Initialize(config)) {
+    auto config = nq::utils::otel::LoadConfig();
+    if (!nq::utils::otel::Initialize(config)) {
         return 1;
     }
     
     // 使用...
     
     // 关闭
-    atm::utils::otel::Shutdown();
+    nq::utils::otel::Shutdown();
     return 0;
 }
 ```
@@ -119,8 +119,8 @@ int main() {
 
 #### 追踪（Traces）
 ```python
-from atm.utils.otel import get_tracer
-from atm.utils.otel_helpers import trace_function, trace_span
+from nq.utils.otel import get_tracer
+from nq.utils.otel_helpers import trace_function, trace_span
 
 # 方式 1: 使用装饰器
 @trace_function(attributes={"component": "data_ingestor"})
@@ -129,7 +129,7 @@ def sync_stock_data():
     pass
 
 # 方式 2: 使用上下文管理器
-from atm.utils.otel_helpers import trace_span
+from nq.utils.otel_helpers import trace_span
 
 with trace_span("data_sync", attributes={"stock_code": "000001.SZ"}):
     sync_stock_data()
@@ -143,7 +143,7 @@ with tracer.start_as_current_span("operation") as span:
 
 #### 指标（Metrics）
 ```python
-from atm.utils.otel_helpers import MetricsCounter, MetricsHistogram, record_duration
+from nq.utils.otel_helpers import MetricsCounter, MetricsHistogram, record_duration
 
 # 计数器
 counter = MetricsCounter("orders.total", description="Total orders")
@@ -208,20 +208,20 @@ err := otel.RecordDuration(ctx, "data_sync.duration", func(ctx context.Context) 
 
 #### 追踪（Traces）
 ```cpp
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 
 // 方式 1: 使用 RAII helper
 {
-    auto tracer = atm::utils::otel::GetTracer("atm");
+    auto tracer = nq::utils::otel::GetTracer("nexusquant");
     auto span = tracer->StartSpan("operation", {{"key", "value"}});
-    atm::utils::otel::SpanScope span_scope(std::move(span));
+    nq::utils::otel::SpanScope span_scope(std::move(span));
     
     // 你的代码
     span_scope->SetAttribute("status", "success");
 }
 
 // 方式 2: 手动管理
-auto tracer = atm::utils::otel::GetTracer("atm");
+auto tracer = nq::utils::otel::GetTracer("nexusquant");
 auto span = tracer->StartSpan("operation");
 span->SetAttribute("key", "value");
 // 你的代码
@@ -230,10 +230,10 @@ span->End();
 
 #### 指标（Metrics）
 ```cpp
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 
 // 计数器
-auto meter = atm::utils::otel::GetMeter("atm");
+auto meter = nq::utils::otel::GetMeter("nexusquant");
 auto counter = meter->CreateCounter("orders.total", "Total orders");
 counter->Add(1, {{"status", "success"}});
 
@@ -246,7 +246,7 @@ histogram->Record(150.5, {{"order_type", "market"}});
 
 ### Python
 ```python
-from atm.utils.otel_logger import setup_logger
+from nq.utils.otel_logger import setup_logger
 
 # 日志格式保持不变
 logger = setup_logger("my_module")
@@ -334,7 +334,7 @@ except Exception as e:
 ### 检查 OpenTelemetry 是否启用
 
 ```python
-from atm.utils.otel import get_config
+from nq.utils.otel import get_config
 config = get_config()
 print(f"Enabled: {config.is_enabled()}")
 ```

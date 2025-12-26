@@ -16,7 +16,7 @@ func TraceFunc(ctx context.Context, name string, fn func(context.Context) error,
 		return fn(ctx)
 	}
 
-	tracer := GetTracer("atm")
+	tracer := GetTracer("nexusquant")
 	ctx, span := tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 	defer span.End()
 
@@ -36,7 +36,7 @@ func RecordDuration(ctx context.Context, metricName string, fn func(context.Cont
 	duration := time.Since(start)
 
 	if IsEnabled() {
-		meter := GetMeter("atm")
+		meter := GetMeter("nexusquant")
 		histogram, createErr := meter.Float64Histogram(metricName, metric.WithDescription("Function execution duration"))
 		if createErr == nil && histogram != nil {
 			histogram.Record(ctx, float64(duration.Milliseconds()), metric.WithAttributes(attrs...))
@@ -58,7 +58,7 @@ func NewCounter(name, description string) *Counter {
 		return &Counter{}
 	}
 
-	meter := GetMeter("atm")
+	meter := GetMeter("nexusquant")
 	counter, _ := meter.Int64Counter(name, metric.WithDescription(description))
 	return &Counter{
 		counter: counter,
@@ -85,7 +85,7 @@ func NewHistogram(name, description, unit string) *Histogram {
 		return &Histogram{}
 	}
 
-	meter := GetMeter("atm")
+	meter := GetMeter("nexusquant")
 	histogram, _ := meter.Float64Histogram(name, metric.WithDescription(description), metric.WithUnit(unit))
 	return &Histogram{
 		histogram: histogram,

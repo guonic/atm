@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```
-atm/
+nexusquant/
 ├── README.md                    # 项目说明
 ├── LICENSE                       # 许可证
 ├── .gitignore                   # Git 忽略文件

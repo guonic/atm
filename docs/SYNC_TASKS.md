@@ -22,22 +22,22 @@
 
 ```bash
 # 同步所有已上市股票
-./scripts/atm sync stock-basic
+./scripts/nq sync stock-basic
 
 # 同步指定交易所
-./scripts/atm sync stock-basic --exchange SSE
+./scripts/nq sync stock-basic --exchange SSE
 
 # 同步所有状态（包括已退市）
-./scripts/atm sync stock-basic --list-status ""
+./scripts/nq sync stock-basic --list-status ""
 
 # 自定义批次大小
-./scripts/atm sync stock-basic --batch-size 200
+./scripts/nq sync stock-basic --batch-size 200
 
 # 不使用断点续传（重新开始）
-./scripts/atm sync stock-basic --no-resume
+./scripts/nq sync stock-basic --no-resume
 
 # 使用数据库存储状态（多实例部署）
-./scripts/atm sync stock-basic --use-db-state
+./scripts/nq sync stock-basic --use-db-state
 ```
 
 #### 方法 2: 直接使用 Python 脚本
@@ -110,8 +110,8 @@ export DB_SCHEMA=quant
 任务状态保存在 `storage/state/` 目录（文件模式）或数据库 `quant.ingestion_state` 表（数据库模式）。
 
 ```python
-from atm.config import DatabaseConfig
-from atm.repo import FileStateRepo
+from nq.config import DatabaseConfig
+from nq.repo import FileStateRepo
 from tools.dataingestor import StockIngestorService
 
 db_config = DatabaseConfig(...)
@@ -149,7 +149,7 @@ ingestor.reset_task_state("stock_basic_sync_all_L")
 
 ```bash
 # 默认就是 upsert 模式
-./scripts/atm sync stock-basic
+./scripts/nq sync stock-basic
 ```
 
 #### Append 模式（追加）
@@ -175,11 +175,11 @@ stats = ingestor.ingest_stock_basic(
 
 ```bash
 # 第一个实例
-./scripts/atm sync stock-basic --task-name test_task &
+./scripts/nq sync stock-basic --task-name test_task &
 # 进程 ID: 12345
 
 # 第二个实例（会失败）
-./scripts/atm sync stock-basic --task-name test_task
+./scripts/nq sync stock-basic --task-name test_task
 # Error: Task test_task is already running
 ```
 
@@ -207,11 +207,11 @@ stats = ingestor.ingest_stock_basic(
 
 ```bash
 # 第一次运行（处理到一半中断）
-./scripts/atm sync stock-basic
+./scripts/nq sync stock-basic
 # ... 处理了 5000 条记录后中断
 
 # 第二次运行（从第 5000 条继续）
-./scripts/atm sync stock-basic --resume
+./scripts/nq sync stock-basic --resume
 # 从上次停止的地方继续处理
 ```
 
@@ -232,7 +232,7 @@ if state and state.status == "running":
 #### 2. 数据库连接失败
 
 **检查**:
-- 数据库服务是否运行: `./scripts/atm storage status`
+- 数据库服务是否运行: `./scripts/nq storage status`
 - 连接参数是否正确
 - 防火墙设置
 
@@ -275,30 +275,30 @@ if state and state.status == "running":
 crontab -e
 
 # 每天凌晨 2 点同步股票基础信息
-0 2 * * * cd /path/to/atm && ./scripts/atm sync stock-basic >> /var/log/atm/sync_stock_basic.log 2>&1
+0 2 * * * cd /path/to/nexusquant && ./scripts/nq sync stock-basic >> /var/log/nexusquant/sync_stock_basic.log 2>&1
 ```
 
 #### 使用 systemd timer
 
-创建 `/etc/systemd/system/atm-sync-stock-basic.service`:
+创建 `/etc/systemd/system/nexusquant-sync-stock-basic.service`:
 ```ini
 [Unit]
-Description=ATM Stock Basic Sync Task
+Description=NexusQuant Stock Basic Sync Task
 After=network.target
 
 [Service]
 Type=oneshot
 User=quant
-WorkingDirectory=/path/to/atm
+WorkingDirectory=/path/to/nexusquant
 Environment="TUSHARE_TOKEN=your_token"
-ExecStart=/path/to/atm/scripts/atm sync stock-basic
+ExecStart=/path/to/nexusquant/scripts/nq sync stock-basic
 ```
 
-创建 `/etc/systemd/system/atm-sync-stock-basic.timer`:
+创建 `/etc/systemd/system/nexusquant-sync-stock-basic.timer`:
 ```ini
 [Unit]
-Description=Run ATM Stock Basic Sync Daily
-Requires=atm-sync-stock-basic.service
+Description=Run NexusQuant Stock Basic Sync Daily
+Requires=nexusquant-sync-stock-basic.service
 
 [Timer]
 OnCalendar=daily
@@ -310,8 +310,8 @@ WantedBy=timers.target
 
 启用定时器:
 ```bash
-sudo systemctl enable atm-sync-stock-basic.timer
-sudo systemctl start atm-sync-stock-basic.timer
+sudo systemctl enable nexusquant-sync-stock-basic.timer
+sudo systemctl start nexusquant-sync-stock-basic.timer
 ```
 
 ### 性能优化

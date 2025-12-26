@@ -12,8 +12,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from atm.config import DatabaseConfig
-from atm.repo import (
+from nq.config import DatabaseConfig
+from nq.repo import (
     DatabaseStateRepo,
     DatabaseTaskLock,
     FileStateRepo,

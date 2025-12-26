@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from atm.config import DatabaseConfig
+from nq.config import DatabaseConfig
 from tools.dataingestor import StockIngestorService
 
 # Configure logging

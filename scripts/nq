@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# nq - NexusQuant 主入口脚本，支持子命令插件机制
+# 类似于 kubectl 的命令结构
+
+set -e
+
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# 显示帮助信息
+show_help() {
+    cat << EOF
+用法: nq <command> [options]
+
+命令:
+  storage   管理数据库服务（TimescaleDB）
+            - start: 启动数据库服务
+            - stop: 停止数据库服务
+            - restart: 重启数据库服务
+            - status: 查看服务状态
+            - login: 登录数据库
+            - psql: 打印 psql 连接命令
+
+  sync      数据同步任务
+            - stock-basic: 同步股票基础信息（覆盖模式）
+            - trading-calendar: 同步交易日历数据（覆盖模式）
+            - kline: 同步K线数据（追加模式）
+            - premarket: 同步股票盘前数据（股本情况）
+            - industry-classify: 同步申万行业分类
+            - industry-member: 同步申万行业成分
+
+  export-qlib 导出数据到 Qlib 格式
+            - day: 导出日线数据
+            - week: 导出周线数据
+            - month: 导出月线数据
+            - quarter: 导出季线数据
+            - hour: 导出小时数据
+            - 30min: 导出30分钟数据
+            - 15min: 导出15分钟数据
+            - 5min: 导出5分钟数据
+            - 1min: 导出1分钟数据
+
+  help      显示此帮助信息
+
+示例:
+  nq storage start
+  nq storage stop
+  nq storage login
+  nq storage psql
+  nq sync stock-basic
+  nq sync stock-basic --exchange SSE
+  nq sync trading-calendar
+  nq sync kline --type day
+  nq sync premarket --trade-date 20241222
+  nq sync industry-classify --src SW2021
+  nq sync industry-member
+  nq export-qlib day
+  nq export-qlib day --stocks 000001.SZ 000002.SZ
+  nq export-qlib day --incremental
+  nq help
+
+EOF
+}
+
+# 执行子命令
+execute_subcommand() {
+    local command=$1
+    shift
+    
+    case "$command" in
+        storage)
+            if [ -f "$SCRIPT_DIR/storage_controller.sh" ]; then
+                "$SCRIPT_DIR/storage_controller.sh" "$@"
+            else
+                echo "错误: 找不到 storage_controller.sh 脚本"
+                exit 1
+            fi
+            ;;
+        sync)
+            if [ -f "$SCRIPT_DIR/sync_controller.sh" ]; then
+                "$SCRIPT_DIR/sync_controller.sh" "$@"
+            else
+                echo "错误: 找不到 sync_controller.sh 脚本"
+                exit 1
+            fi
+            ;;
+        export-qlib)
+            if [ -f "$SCRIPT_DIR/export_qlib.sh" ]; then
+                "$SCRIPT_DIR/export_qlib.sh" "$@"
+            else
+                echo "错误: 找不到 export_qlib.sh 脚本"
+                exit 1
+            fi
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            echo "错误: 未知命令 '$command'"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# 主逻辑
+main() {
+    if [ $# -eq 0 ]; then
+        show_help
+        exit 0
+    fi
+    
+    execute_subcommand "$@"
+}
+
+main "$@"
+

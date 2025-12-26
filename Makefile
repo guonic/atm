@@ -18,7 +18,7 @@ NC := \033[0m # No Color
 
 ## help: 显示帮助信息
 help:
-	@echo "$(GREEN)ATM - Automated Trading Machine$(NC)"
+	@echo "$(GREEN)NexusQuant$(NC)"
 	@echo ""
 	@echo "可用命令:"
 	@echo "  $(YELLOW)make build$(NC)          - 构建所有语言（Python、Go、C++）"
@@ -142,27 +142,27 @@ docker-down:
 
 ## storage-start: 启动数据库服务
 storage-start:
-	@$(SCRIPTS_DIR)/atm storage start
+	@$(SCRIPTS_DIR)/nq storage start
 
 ## storage-stop: 停止数据库服务
 storage-stop:
-	@$(SCRIPTS_DIR)/atm storage stop
+	@$(SCRIPTS_DIR)/nq storage stop
 
 ## storage-status: 查看数据库状态
 storage-status:
-	@$(SCRIPTS_DIR)/atm storage status
+	@$(SCRIPTS_DIR)/nq storage status
 
 ## storage-restart: 重启数据库服务
 storage-restart:
-	@$(SCRIPTS_DIR)/atm storage restart
+	@$(SCRIPTS_DIR)/nq storage restart
 
 ## storage-login: 登录数据库
 storage-login:
-	@$(SCRIPTS_DIR)/atm storage login
+	@$(SCRIPTS_DIR)/nq storage login
 
 ## storage-psql: 显示 psql 连接命令
 storage-psql:
-	@$(SCRIPTS_DIR)/atm storage psql
+	@$(SCRIPTS_DIR)/nq storage psql
 
 ## format: 格式化代码
 format: format-python format-go format-cpp

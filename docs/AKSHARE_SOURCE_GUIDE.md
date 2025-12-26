@@ -19,7 +19,7 @@ pip install akshare --upgrade
 ### 1. 创建数据源
 
 ```python
-from atm.data.source.akshare_source import AkshareSource, AkshareSourceConfig
+from nq.data.source.akshare_source import AkshareSource, AkshareSourceConfig
 
 # 创建配置
 config = AkshareSourceConfig(
@@ -202,8 +202,8 @@ with AkshareSource(AkshareSourceConfig()) as source:
 ## 错误处理
 
 ```python
-from atm.data.source.akshare_source import AkshareSource, AkshareSourceConfig
-from atm.data.source.base import DataFetchError, ConnectionError
+from nq.data.source.akshare_source import AkshareSource, AkshareSourceConfig
+from nq.data.source.base import DataFetchError, ConnectionError
 
 try:
     source = AkshareSource(AkshareSourceConfig())

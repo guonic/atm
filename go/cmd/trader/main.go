@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	fmt.Println("ATM Trader Service")
+	fmt.Println("NexusQuant Trader Service")
 	fmt.Println("Version: 0.1.0")
 
 	if len(os.Args) > 1 {

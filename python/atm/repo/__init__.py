@@ -1,8 +1,8 @@
 """Data repository module for ATM project."""
 
-from atm.repo.base import BaseRepo, ConnectionError, RepoError, SaveError
-from atm.repo.database_repo import DatabaseRepo
-from atm.repo.backtest_repo import BacktestRepo
+from nq.repo.base import BaseRepo, ConnectionError, RepoError, SaveError
+from nq.repo.database_repo import DatabaseRepo
+from nq.repo.backtest_repo import BacktestRepo
 from atm.repo.kline_repo import (
     StockKline15MinRepo,
     StockKline1MinRepo,
@@ -26,7 +26,7 @@ from atm.repo.task_lock import (
     FileTaskLock,
     TaskLockError,
 )
-from atm.repo.stock_repo import (
+from nq.repo.stock_repo import (
     StockBasicRepo,
     StockClassifyRepo,
     StockFinanceBasicRepo,
@@ -37,7 +37,7 @@ from atm.repo.stock_repo import (
     StockQuoteSnapshotRepo,
     StockTradeRuleRepo,
 )
-from atm.repo.trading_calendar_repo import TradingCalendarRepo
+from nq.repo.trading_calendar_repo import TradingCalendarRepo
 
 __all__ = [
     # Base classes

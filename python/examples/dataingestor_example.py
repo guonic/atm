@@ -11,8 +11,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from atm.config import load_config
-from atm.service import DataIngestorService
+from nq.config import load_config
+from nq.service import DataIngestorService
 
 # Configure logging
 logging.basicConfig(

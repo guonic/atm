@@ -24,7 +24,7 @@ OpenTelemetry 日志主要用于：
 ### 方式 1：保持现有格式（推荐）
 
 ```python
-from atm.utils.logger import setup_logger
+from nq.utils.logger import setup_logger
 
 # 使用原有方式，格式完全不变
 logger = setup_logger("my_module")
@@ -35,7 +35,7 @@ logger.info("This log format stays the same")
 ### 方式 2：启用 OpenTelemetry（可选）
 
 ```python
-from atm.utils.otel_logger import setup_logger_with_otel
+from nq.utils.otel_logger import setup_logger_with_otel
 
 # 启用 OpenTelemetry，但格式仍然不变
 logger = setup_logger_with_otel(
@@ -103,7 +103,7 @@ export ATM_SERVICE_NAME=atm-api
 
 ```python
 import os
-from atm.utils.otel_logger import setup_logger_with_otel
+from nq.utils.otel_logger import setup_logger_with_otel
 
 logger = setup_logger_with_otel(
     name="my_module",
@@ -119,7 +119,7 @@ logger = setup_logger_with_otel(
 
 ```python
 # 继续使用原有方式
-from atm.utils.logger import setup_logger
+from nq.utils.logger import setup_logger
 logger = setup_logger("my_module")
 ```
 
@@ -127,13 +127,13 @@ logger = setup_logger("my_module")
 
 ```python
 # 在需要追踪的服务中启用
-from atm.utils.otel_logger import setup_logger_with_otel
+from nq.utils.otel_logger import setup_logger_with_otel
 
 # API 服务启用
 logger = setup_logger_with_otel("atm.api", enable_otel=True)
 
 # 数据同步任务不启用（保持原样）
-logger = setup_logger("atm.data.sync")
+logger = setup_logger("nq.data.sync")
 ```
 
 ### 阶段 3：全面启用（生产环境）

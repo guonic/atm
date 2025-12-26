@@ -38,9 +38,9 @@ from datetime import datetime
 
 import pandas as pd
 
-from atm.analysis.backtest import BacktestReport, PredictorBacktester
-from atm.config import load_config
-from atm.trading.predictor import KronosPredictor
+from nq.analysis.backtest import BacktestReport, PredictorBacktester
+from nq.config import load_config
+from nq.trading.predictor import KronosPredictor
 
 # Configure logging
 logging.basicConfig(

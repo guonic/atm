@@ -41,8 +41,8 @@ from typing import List
 
 import pandas as pd
 
-from atm.config import load_config
-from atm.trading.selector import (
+from nq.config import load_config
+from nq.trading.selector import (
     CompositeSelector,
     FundamentalSelector,
     TechnicalSelector,

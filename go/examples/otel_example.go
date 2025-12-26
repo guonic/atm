@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/atm/atm/pkg/utils/otel"
+	"github.com/nexusquant/nq/pkg/utils/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -15,9 +15,9 @@ func main() {
 
 	// Initialize OpenTelemetry
 	// Can be controlled via environment variables:
-	//   export ATM_OTEL_ENABLED=true
-	//   export ATM_OTEL_ENDPOINT=localhost:4317
-	//   export ATM_SERVICE_NAME=atm-example
+	//   export NQ_OTEL_ENABLED=true
+	//   export NQ_OTEL_ENDPOINT=localhost:4317
+	//   export NQ_SERVICE_NAME=nexusquant-example
 
 	if err := otel.Initialize(ctx, nil); err != nil {
 		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)

@@ -2,7 +2,7 @@
 
 ## 目录组织
 
-### `python/atm/` - 核心业务模块
+### `python/nq/` - 核心业务模块
 
 核心业务逻辑和共享组件：
 
@@ -40,17 +40,17 @@
 
 ## 模块职责
 
-### Models (`atm/models/`)
+### Models (`nq/models/`)
 - 定义数据模型和数据结构
 - 使用 Pydantic 进行数据验证
 - 通用模型基类
 
-### Repo (`atm/repo/`)
+### Repo (`nq/repo/`)
 - **核心仓库实现**，供所有服务使用
 - 数据库访问抽象层
 - 支持多种存储后端
 
-### Service (`atm/service/`)
+### Service (`nq/service/`)
 - **核心服务实现**，供其他模块调用
 - 业务逻辑协调层
 - 使用 repo 和 models
@@ -65,16 +65,16 @@
 ### 使用核心服务
 
 ```python
-from atm.service import DataIngestorService
-from atm.repo import DatabaseRepo
-from atm.models import BaseModel
+from nq.service import DataIngestorService
+from nq.repo import DatabaseRepo
+from nq.models import BaseModel
 ```
 
 ### 使用工具
 
 ```python
-from atm.tools.dataingestor import DataIngestorService
-from atm.data.source import HttpSource
+from nq.tools.dataingestor import DataIngestorService
+from nq.data.source import HttpSource
 ```
 
 ## 设计原则

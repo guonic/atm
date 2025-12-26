@@ -1,7 +1,7 @@
-# ATM 项目代码约束规则
+# NexusQuant 项目代码约束规则
 
 ## 项目概述
-这是一个量化交易系统（ATM - Automated Trading Machine），采用 Python、Golang、C++ 混合开发架构。
+这是一个量化交易系统（NexusQuant），采用 Python、Golang、C++ 混合开发架构。
 
 ## 项目结构
 

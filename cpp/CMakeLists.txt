@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(atm VERSION 0.1.0 LANGUAGES CXX)
+project(nexusquant VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,18 +18,18 @@ file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.cc")
 file(GLOB_RECURSE HEADERS "include/*.hpp" "include/*.h")
 
 # 创建库
-add_library(atm SHARED ${SOURCES} ${HEADERS})
+add_library(nq SHARED ${SOURCES} ${HEADERS})
 
 # 链接库
-target_link_libraries(atm)
+target_link_libraries(nq)
 
 # OpenTelemetry C++ (optional, requires opentelemetry-cpp)
 # Uncomment when OpenTelemetry C++ SDK is installed
 # find_package(opentelemetry-cpp REQUIRED)
-# target_link_libraries(atm PUBLIC opentelemetry::api opentelemetry::sdk)
+# target_link_libraries(nq PUBLIC opentelemetry::api opentelemetry::sdk)
 
 # 安装
-install(TARGETS atm
+install(TARGETS nq
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin

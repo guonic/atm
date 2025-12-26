@@ -8,15 +8,15 @@ import logging
 import os
 import time
 
-from atm.utils.otel import initialize_otel, get_tracer, get_meter
-from atm.utils.otel_helpers import (
+from nq.utils.otel import initialize_otel, get_tracer, get_meter
+from nq.utils.otel_helpers import (
     MetricsCounter,
     MetricsHistogram,
     record_duration,
     trace_function,
     trace_span,
 )
-from atm.utils.otel_logger import setup_logger
+from nq.utils.otel_logger import setup_logger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,15 +36,15 @@ def main():
     """Run OpenTelemetry example."""
     # Initialize OpenTelemetry
     # Can be controlled via environment variables:
-    #   export ATM_OTEL_ENABLED=true
-    #   export ATM_OTEL_ENDPOINT=localhost:4317
-    #   export ATM_SERVICE_NAME=atm-example
+    #   export NQ_OTEL_ENABLED=true
+    #   export NQ_OTEL_ENDPOINT=localhost:4317
+    #   export NQ_SERVICE_NAME=nexusquant-example
 
     initialize_otel(
         service_name="atm-example",
         service_version="0.1.0",
-        endpoint=os.getenv("ATM_OTEL_ENDPOINT", "localhost:4317"),
-        enabled=os.getenv("ATM_OTEL_ENABLED", "false").lower() == "true",
+        endpoint=os.getenv("NQ_OTEL_ENDPOINT", "localhost:4317"),
+        enabled=os.getenv("NQ_OTEL_ENABLED", "false").lower() == "true",
     )
 
     # Setup logger (format stays the same)

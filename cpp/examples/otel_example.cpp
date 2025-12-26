@@ -1,19 +1,19 @@
 // Example: Using OpenTelemetry in C++
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 #include <iostream>
 
 int main() {
     // Load configuration from environment variables
-    auto config = atm::utils::otel::LoadConfig();
+    auto config = nq::utils::otel::LoadConfig();
     
     // Initialize OpenTelemetry
-    if (!atm::utils::otel::Initialize(config)) {
+    if (!nq::utils::otel::Initialize(config)) {
         std::cout << "OpenTelemetry initialization failed or disabled" << std::endl;
         return 1;
     }
     
     // Example 1: Using tracer
-    auto tracer = atm::utils::otel::GetTracer("example");
+    auto tracer = nq::utils::otel::GetTracer("example");
     if (tracer) {
         auto span = tracer->StartSpan("example_operation", {
             {"component", "example"},
@@ -27,7 +27,7 @@ int main() {
     }
     
     // Example 2: Using meter
-    auto meter = atm::utils::otel::GetMeter("example");
+    auto meter = nq::utils::otel::GetMeter("example");
     if (meter) {
         auto counter = meter->CreateCounter("example.operations", "Total operations");
         if (counter) {
@@ -42,10 +42,10 @@ int main() {
     
     // Example 3: Using RAII helper
     {
-        auto tracer2 = atm::utils::otel::GetTracer("example");
+        auto tracer2 = nq::utils::otel::GetTracer("example");
         if (tracer2) {
             auto span = tracer2->StartSpan("raii_example");
-            atm::utils::otel::SpanScope span_scope(std::move(span));
+            nq::utils::otel::SpanScope span_scope(std::move(span));
             
             if (span_scope.get()) {
                 span_scope->SetAttribute("key", "value");
@@ -55,7 +55,7 @@ int main() {
     }
     
     // Shutdown
-    atm::utils::otel::Shutdown();
+    nq::utils::otel::Shutdown();
     
     std::cout << "OpenTelemetry example completed" << std::endl;
     return 0;

@@ -13,10 +13,10 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from atm.config import DatabaseConfig
-from atm.data.source import TushareSource, TushareSourceConfig
-from atm.models import StockBasic
-from atm.repo import StockBasicRepo, StockKlineDayRepo
+from nq.config import DatabaseConfig
+from nq.data.source import TushareSource, TushareSourceConfig
+from nq.models import StockBasic
+from nq.repo import StockBasicRepo, StockKlineDayRepo
 
 # Configure logging
 logging.basicConfig(
