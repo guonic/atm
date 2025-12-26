@@ -20,8 +20,8 @@ import pandas as pd
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from atm.config import DatabaseConfig, load_config
-from atm.repo.kline_repo import StockKlineDayRepo
+from nq.config import DatabaseConfig, load_config
+from nq.repo.kline_repo import StockKlineDayRepo
 
 # Import project's dump_bin module directly (same directory)
 # Add the tools/qlib directory to path for direct import

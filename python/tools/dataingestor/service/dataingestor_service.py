@@ -7,12 +7,12 @@ Orchestrates data ingestion from sources and storage in repositories.
 import logging
 from typing import Optional
 
-from atm.config import DataIngestorTaskConfig, DatabaseConfig
-from atm.repo.base import BaseRepo
-from atm.repo.database_repo import DatabaseRepo
-from atm.data.source.base import BaseSource
-from atm.data.source.http_source import HttpSource, HttpSourceConfig
-from atm.data.source.tushare_source import TushareSource, TushareSourceConfig
+from nq.config import DataIngestorTaskConfig, DatabaseConfig
+from nq.repo.base import BaseRepo
+from nq.repo.database_repo import DatabaseRepo
+from nq.data.source.base import BaseSource
+from nq.data.source.http_source import HttpSource, HttpSourceConfig
+from nq.data.source.tushare_source import TushareSource, TushareSourceConfig
 
 logger = logging.getLogger(__name__)
 

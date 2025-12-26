@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from atm.analysis.backtest.common_args import create_base_parser
-from atm.analysis.backtest.evaluation_runner import run_strategy_evaluation
-from atm.trading.strategies.atr_dynamic_stop_strategy import ATRDynamicStopStrategy
+from nq.analysis.backtest.common_args import create_base_parser
+from nq.analysis.backtest.evaluation_runner import run_strategy_evaluation
+from nq.trading.strategies.atr_dynamic_stop_strategy import ATRDynamicStopStrategy
 
 logging.basicConfig(
     level=logging.INFO,

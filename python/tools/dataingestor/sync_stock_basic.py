@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from sqlalchemy import text
 
-from atm.config import DatabaseConfig, load_config
-from atm.repo import DatabaseStateRepo, FileStateRepo, StockBasicRepo
+from nq.config import DatabaseConfig, load_config
+from nq.repo import DatabaseStateRepo, FileStateRepo, StockBasicRepo
 from tools.dataingestor import StockIngestorService
 
 # Configure logging
