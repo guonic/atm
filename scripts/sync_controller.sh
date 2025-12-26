@@ -22,6 +22,8 @@ Commands:
   trading-calendar    Synchronize trading calendar data (upsert mode)
   kline               Synchronize K-line data for all stocks (append mode)
   premarket           Synchronize stock premarket information (股本情况盘前数据)
+  industry-classify   Synchronize Shenwan industry classification (申万行业分类)
+  industry-member     Synchronize Shenwan industry member (申万行业成分)
   help                 Show this help message
 
 Examples:
@@ -52,6 +54,15 @@ Examples:
   # Sync premarket data for a specific stock
   $0 premarket --ts-code 000001.SZ
 
+  # Sync Shenwan industry classification (SW2021)
+  $0 industry-classify --src SW2021
+
+  # Sync Shenwan industry members for all stocks
+  $0 industry-member
+
+  # Sync industry members by L3 code
+  $0 industry-member --l3-code 850531.SI
+
   # Sync with custom batch size
   $0 stock-basic --batch-size 200
 
@@ -63,6 +74,8 @@ For detailed options, use:
   $0 trading-calendar --help
   $0 kline --help
   $0 premarket --help
+  $0 industry-classify --help
+  $0 industry-member --help
 EOF
 }
 
@@ -83,6 +96,14 @@ case "${1:-}" in
     premarket)
         shift
         exec "$SCRIPT_DIR/sync_premarket.sh" "$@"
+        ;;
+    industry-classify)
+        shift
+        exec "$SCRIPT_DIR/sync_industry_classify.sh" "$@"
+        ;;
+    industry-member)
+        shift
+        exec "$SCRIPT_DIR/sync_industry_member.sh" "$@"
         ;;
     help|--help|-h|"")
         show_usage

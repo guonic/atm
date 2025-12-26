@@ -15,6 +15,8 @@ from atm.models.stock import (
     StockBasic,
     StockClassify,
     StockFinanceBasic,
+    StockIndustryClassify,
+    StockIndustryMember,
     StockKlineSyncState,
     StockPremarket,
     StockQuoteSnapshot,
@@ -679,5 +681,284 @@ class StockKlineSyncStateRepo(DatabaseRepo):
             if row:
                 return StockKlineSyncState(**dict(row._mapping))
         return None
+
+
+# =============================================
+# Stock Industry Classify Repository
+# =============================================
+
+
+class StockIndustryClassifyRepo(DatabaseRepo):
+    """Repository for stock industry classification (申万行业分类)."""
+
+    def __init__(self, config: DatabaseConfig, schema: str = "quant"):
+        """Initialize stock industry classify repository."""
+        super().__init__(
+            config=config,
+            table_name="stock_industry_classify",
+            schema=schema,
+            on_conflict="update",
+        )
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        """Ensure table exists."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+        simple_table_name = self.table_name
+
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            index_code VARCHAR(20) NOT NULL,
+            industry_name VARCHAR(100) NOT NULL,
+            parent_code VARCHAR(20) NOT NULL,
+            level VARCHAR(10) NOT NULL,
+            industry_code VARCHAR(20),
+            is_pub VARCHAR(1),
+            src VARCHAR(20) NOT NULL,
+            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (index_code, src)
+        );
+        """
+
+        create_index_sql1 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_parent ON {table_name}(parent_code, src);
+        """
+
+        create_index_sql2 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_level ON {table_name}(level, src);
+        """
+
+        create_index_sql3 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_src ON {table_name}(src);
+        """
+
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(create_table_sql))
+                conn.execute(text(create_index_sql1))
+                conn.execute(text(create_index_sql2))
+                conn.execute(text(create_index_sql3))
+            logger.info(f"Ensured table {table_name} exists.")
+        except Exception as e:
+            logger.warning(f"Failed to create industry classify table {table_name} (may already exist): {e}")
+            if not self.table_exists():
+                raise RepoError(f"Table {table_name} does not exist and could not be created.") from e
+
+    def save_model(self, classify: StockIndustryClassify) -> bool:
+        """Save a StockIndustryClassify model."""
+        data = classify.model_dump(exclude_none=True)
+        if "update_time" in data and isinstance(data["update_time"], datetime):
+            data["update_time"] = data["update_time"].isoformat()
+        return self.save(data)
+
+    def save_batch_models(self, classifies: List[StockIndustryClassify]) -> int:
+        """Save multiple StockIndustryClassify models."""
+        data_list = []
+        for classify in classifies:
+            data = classify.model_dump(exclude_none=True)
+            if "update_time" in data and isinstance(data["update_time"], datetime):
+                data["update_time"] = data["update_time"].isoformat()
+            data_list.append(data)
+        return self.save_batch(data_list)
+
+    def get_by_level(self, level: str, src: str = "SW2021") -> List[StockIndustryClassify]:
+        """Get classifications by level."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(f"SELECT * FROM {table_name} WHERE level = :level AND src = :src ORDER BY index_code"),
+                {"level": level, "src": src},
+            )
+            return [StockIndustryClassify(**dict(row._mapping)) for row in result]
+
+    def get_by_parent(self, parent_code: str, src: str = "SW2021") -> List[StockIndustryClassify]:
+        """Get classifications by parent code."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(f"SELECT * FROM {table_name} WHERE parent_code = :parent_code AND src = :src ORDER BY index_code"),
+                {"parent_code": parent_code, "src": src},
+            )
+            return [StockIndustryClassify(**dict(row._mapping)) for row in result]
+
+    def delete_by_src(self, src: str) -> bool:
+        """Delete all classifications for a specific source version."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        try:
+            with engine.begin() as conn:
+                result = conn.execute(
+                    text(f"DELETE FROM {table_name} WHERE src = :src"),
+                    {"src": src},
+                )
+                logger.info(f"Deleted {result.rowcount} records for src={src}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete classifications for src={src}: {e}")
+            return False
+
+
+# =============================================
+# Stock Industry Member Repository
+# =============================================
+
+
+class StockIndustryMemberRepo(DatabaseRepo):
+    """Repository for stock industry member (申万行业成分)."""
+
+    def __init__(self, config: DatabaseConfig, schema: str = "quant"):
+        """Initialize stock industry member repository."""
+        super().__init__(
+            config=config,
+            table_name="stock_industry_member",
+            schema=schema,
+            on_conflict="update",
+        )
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        """Ensure table exists."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+        simple_table_name = self.table_name
+
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            ts_code VARCHAR(20) NOT NULL,
+            l1_code VARCHAR(20) NOT NULL,
+            l1_name VARCHAR(100) NOT NULL,
+            l2_code VARCHAR(20) NOT NULL,
+            l2_name VARCHAR(100) NOT NULL,
+            l3_code VARCHAR(20) NOT NULL,
+            l3_name VARCHAR(100) NOT NULL,
+            stock_name VARCHAR(100),
+            in_date DATE NOT NULL,
+            out_date DATE,
+            is_new VARCHAR(1) DEFAULT 'Y',
+            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ts_code, l3_code, in_date)
+        );
+        """
+
+        create_index_sql1 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_ts_code ON {table_name}(ts_code);
+        """
+
+        create_index_sql2 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_l1_code ON {table_name}(l1_code);
+        """
+
+        create_index_sql3 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_l2_code ON {table_name}(l2_code);
+        """
+
+        create_index_sql4 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_l3_code ON {table_name}(l3_code);
+        """
+
+        create_index_sql5 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_in_date ON {table_name}(in_date);
+        """
+
+        create_index_sql6 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_out_date ON {table_name}(out_date);
+        """
+
+        create_index_sql7 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_is_new ON {table_name}(is_new);
+        """
+
+        create_index_sql8 = f"""
+        CREATE INDEX IF NOT EXISTS idx_{simple_table_name}_current ON {table_name}(l3_code, out_date) 
+        WHERE out_date IS NULL;
+        """
+
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(create_table_sql))
+                conn.execute(text(create_index_sql1))
+                conn.execute(text(create_index_sql2))
+                conn.execute(text(create_index_sql3))
+                conn.execute(text(create_index_sql4))
+                conn.execute(text(create_index_sql5))
+                conn.execute(text(create_index_sql6))
+                conn.execute(text(create_index_sql7))
+                # Partial index may fail if not supported, ignore error
+                try:
+                    conn.execute(text(create_index_sql8))
+                except Exception:
+                    logger.debug("Partial index not supported, skipping")
+            logger.info(f"Ensured table {table_name} exists.")
+        except Exception as e:
+            logger.warning(f"Failed to create industry member table {table_name} (may already exist): {e}")
+            if not self.table_exists():
+                raise RepoError(f"Table {table_name} does not exist and could not be created.") from e
+
+    def save_model(self, member: StockIndustryMember) -> bool:
+        """Save a StockIndustryMember model."""
+        data = member.model_dump(exclude_none=True)
+        if "update_time" in data and isinstance(data["update_time"], datetime):
+            data["update_time"] = data["update_time"].isoformat()
+        if "in_date" in data and isinstance(data["in_date"], date):
+            data["in_date"] = data["in_date"].isoformat()
+        if "out_date" in data and isinstance(data["out_date"], date):
+            data["out_date"] = data["out_date"].isoformat()
+        return self.save(data)
+
+    def save_batch_models(self, members: List[StockIndustryMember]) -> int:
+        """Save multiple StockIndustryMember models."""
+        data_list = []
+        for member in members:
+            data = member.model_dump(exclude_none=True)
+            if "update_time" in data and isinstance(data["update_time"], datetime):
+                data["update_time"] = data["update_time"].isoformat()
+            if "in_date" in data and isinstance(data["in_date"], date):
+                data["in_date"] = data["in_date"].isoformat()
+            if "out_date" in data and isinstance(data["out_date"], date):
+                data["out_date"] = data["out_date"].isoformat()
+            data_list.append(data)
+        return self.save_batch(data_list)
+
+    def get_by_ts_code(self, ts_code: str, current_only: bool = False) -> List[StockIndustryMember]:
+        """Get industry members by stock code."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if current_only:
+            sql = f"""
+            SELECT * FROM {table_name} 
+            WHERE ts_code = :ts_code AND (out_date IS NULL OR out_date > CURRENT_DATE)
+            ORDER BY in_date DESC
+            """
+        else:
+            sql = f"SELECT * FROM {table_name} WHERE ts_code = :ts_code ORDER BY in_date DESC"
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"ts_code": ts_code})
+            return [StockIndustryMember(**dict(row._mapping)) for row in result]
+
+    def get_by_l3_code(self, l3_code: str, current_only: bool = False) -> List[StockIndustryMember]:
+        """Get industry members by L3 industry code."""
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if current_only:
+            sql = f"""
+            SELECT * FROM {table_name} 
+            WHERE l3_code = :l3_code AND (out_date IS NULL OR out_date > CURRENT_DATE)
+            ORDER BY in_date DESC
+            """
+        else:
+            sql = f"SELECT * FROM {table_name} WHERE l3_code = :l3_code ORDER BY in_date DESC"
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"l3_code": l3_code})
+            return [StockIndustryMember(**dict(row._mapping)) for row in result]
 
 

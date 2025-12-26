@@ -30,6 +30,13 @@ python scripts/get_data.py qlib_data \
 
 **功能**: 将原始数据（CSV）转换为 Qlib 可识别的二进制格式（.bin）
 
+**重要特性**: 
+- ✅ **自动生成所有必需文件**：只需提供 CSV 交易数据，工具会自动生成：
+  - `calendars/day.txt` - 从 CSV 文件中的日期自动提取并去重
+  - `instruments/all.txt` - 从 CSV 文件名（股票代码）自动提取
+  - `features/<stock_code>/day.bin` - 二进制数据文件
+- ✅ **无需手动准备**：不需要预先创建 instruments 或 calendars 文件
+
 **使用方法**:
 
 #### 方法 1: 命令行接口
@@ -176,6 +183,67 @@ Qlib 数据目录的标准结构如下：
    - 检查 `instruments/all.txt` 是否包含所有股票
    - 使用 `check_data.py` 验证数据加载
 
+## 自动生成机制
+
+### Qlib 官方工具自动生成的文件
+
+当使用 `dump_bin` 工具时，**只需要提供 CSV 交易数据**，工具会自动：
+
+1. **自动生成 `calendars/day.txt`**:
+   - 扫描所有 CSV 文件中的日期
+   - 去重并排序
+   - 生成统一的交易日历
+
+2. **自动生成 `instruments/all.txt`**:
+   - 从 CSV 文件名提取股票代码（如 `000001.csv` → `000001`）
+   - 收集所有股票代码
+   - 生成股票列表文件
+
+3. **自动创建 `features/` 目录结构**:
+   - 为每个股票创建目录
+   - 生成对应的 `.bin` 二进制文件
+   - 数据对齐到统一的日历
+
+### 示例流程
+
+```bash
+# 1. 准备 CSV 文件（每个股票一个文件）
+~/.qlib/csv_data/cn_data/
+├── 000001.csv
+├── 000002.csv
+└── ...
+
+# 2. 运行 dump_bin（自动生成所有文件）
+python -m qlib.tools.dump_bin dump_all \
+  --csv_path ~/.qlib/csv_data/cn_data \
+  --qlib_dir ~/.qlib/qlib_data/cn_data
+
+# 3. 自动生成的完整结构
+~/.qlib/qlib_data/cn_data/
+├── calendars/
+│   └── day.txt          # ✅ 自动生成
+├── instruments/
+│   └── all.txt          # ✅ 自动生成
+└── features/
+    ├── 000001/
+    │   └── day.bin      # ✅ 自动生成
+    └── ...
+```
+
+### 注意事项
+
+1. **CSV 文件命名很重要**：
+   - 文件名必须是股票代码（如 `000001.csv`）
+   - 文件名会直接用作 instruments 列表
+
+2. **日期格式必须统一**：
+   - 所有 CSV 文件中的日期格式必须一致
+   - 推荐使用 `YYYY-MM-DD` 格式
+
+3. **数据完整性**：
+   - 工具会自动处理缺失日期（填充 NaN）
+   - 所有股票的数据会对齐到统一的日历
+
 ## 常见问题
 
 ### Q1: 为什么 `qlib.tools.dump_bin` 找不到？
@@ -220,6 +288,88 @@ with open("all.txt", "w") as f:
 - [Qlib GitHub 仓库](https://github.com/microsoft/qlib)
 - [Qlib 官方文档](https://qlib.readthedocs.io/)
 - [Qlib Scripts 目录](https://github.com/microsoft/qlib/tree/main/scripts)
+
+## 数据验证工具
+
+### verify_exported_data.py - 数据验证工具
+
+**功能**: 全面验证导出的 Qlib 数据正确性
+
+**使用方法**:
+```bash
+# 使用默认路径验证
+python python/tools/qlib/verify_exported_data.py
+
+# 指定数据目录
+python python/tools/qlib/verify_exported_data.py \
+  --qlib-dir ~/.qlib/qlib_data/cn_data \
+  --region cn
+```
+
+**验证内容**:
+1. ✅ **目录结构检查**: 验证 `calendars/`, `instruments/`, `features/` 目录是否存在
+2. ✅ **日历文件检查**: 验证 `calendars/day.txt` 格式、日期数量、排序、重复项
+3. ✅ **股票列表检查**: 验证 `instruments/all.txt` 格式、股票数量、重复项
+4. ✅ **特征文件检查**: 验证 `features/<stock_code>/day.bin` 文件是否存在且非空
+5. ✅ **API 加载测试**: 通过 Qlib API 加载数据，验证数据可读性
+6. ✅ **数据完整性检查**: 检查日期对齐、缺失值、负值、零成交量等问题
+
+**输出示例**:
+```
+================================================================================
+Qlib Data Verification
+================================================================================
+Data directory: /Users/guonic/.qlib/qlib_data/cn_data
+
+Step 1: Checking directory structure...
+  ✓ calendars/ directory exists
+  ✓ instruments/ directory exists
+  ✓ features/ directory exists
+
+Step 2: Checking calendar file...
+  ✓ Calendar file contains 483 trading days
+    First date: 20231226
+    Last date: 20251223
+
+Step 3: Checking instruments file...
+  ✓ Instruments file contains 5464 stocks
+    Sample: ['000001', '000002', '000004', '000006', '000007']
+
+Step 4: Checking feature bin files...
+  ✓ Checked 10 sample instruments:
+    Valid: 10
+  Overall coverage: 100.0% (5464/5464)
+
+Step 5: Testing Qlib API data loading...
+  ✓ Qlib initialized successfully
+  ✓ Calendar loaded via API: 483 days
+  ✓ Instruments available: 5464 stocks
+  ✓ Test data loaded: shape=(50, 5)
+    Instruments tested: ['000001', '000002', '000004', '000006', '000007']
+    Date range: 2023-12-26 to 2024-01-10
+    Columns: ['$close', '$open', '$high', '$low', '$volume']
+
+Step 6: Checking data integrity...
+  Checking data integrity for 3 sample instruments...
+    000001: Missing 0 dates (0.0%)
+    000002: Missing 0 dates (0.0%)
+    000004: Missing 0 dates (0.0%)
+
+================================================================================
+Verification Summary
+================================================================================
+✓ All critical checks passed!
+================================================================================
+```
+
+**快速检查脚本**:
+```bash
+# 简单检查（使用已有的 check_data.py）
+python python/tests/qlib/check_data.py
+
+# 全面验证（使用新的 verify_exported_data.py）
+python python/tools/qlib/verify_exported_data.py
+```
 
 ## 相关文档
 

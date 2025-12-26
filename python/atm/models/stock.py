@@ -173,3 +173,48 @@ class StockKlineSyncState(BaseModel):
         }
 
 
+class StockIndustryClassify(BaseModel):
+    """申万行业分类模型 (Shenwan Industry Classification)."""
+
+    index_code: str = Field(..., description="指数代码 (e.g., 801020.SI)")
+    industry_name: str = Field(..., description="行业名称 (e.g., 采掘)")
+    parent_code: str = Field(..., description="父级代码，一级为 '0'")
+    level: str = Field(..., description="行业层级 (L1/L2/L3)")
+    industry_code: Optional[str] = Field(None, description="行业代码")
+    is_pub: Optional[str] = Field(None, description="是否发布了指数")
+    src: str = Field(..., description="行业分类版本 (SW2014/SW2021)")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+
+    class Config:
+        """Pydantic configuration."""
+
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None,
+        }
+
+
+class StockIndustryMember(BaseModel):
+    """申万行业成分模型 (Shenwan Industry Member)."""
+
+    ts_code: str = Field(..., description="股票代码 (e.g., 000001.SZ)")
+    l1_code: str = Field(..., description="一级行业代码")
+    l1_name: str = Field(..., description="一级行业名称")
+    l2_code: str = Field(..., description="二级行业代码")
+    l2_name: str = Field(..., description="二级行业名称")
+    l3_code: str = Field(..., description="三级行业代码")
+    l3_name: str = Field(..., description="三级行业名称")
+    stock_name: Optional[str] = Field(None, description="股票名称")
+    in_date: date = Field(..., description="纳入日期")
+    out_date: Optional[date] = Field(None, description="剔除日期 (NULL 表示当前仍在)")
+    is_new: str = Field("Y", description="是否最新 (Y/N)")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+
+    class Config:
+        """Pydantic configuration."""
+
+        json_encoders = {
+            date: lambda v: v.isoformat() if v else None,
+            datetime: lambda v: v.isoformat() if v else None,
+        }
+
+
