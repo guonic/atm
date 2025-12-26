@@ -113,7 +113,7 @@ pip install -e ".[dev]"
 File → Invalidate Caches / Restart...
 ```
 
-### 2. 找不到 `atm` 模块
+### 2. 找不到 `nq` 模块
 
 **原因**: `python` 目录没有被识别为源代码根目录
 
@@ -149,7 +149,7 @@ import sys
 print(sys.path)
 
 # 应该包含项目路径
-# 例如: '/Users/guonic/Workspace/OpenSource/atm/python'
+# 例如: '/Users/guonic/Workspace/OpenSource/nexusquant/python'
 
 # 测试导入
 from atm.config import DatabaseConfig

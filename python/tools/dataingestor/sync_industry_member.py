@@ -15,8 +15,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from atm.config import load_config
-from atm.repo import DatabaseStateRepo, FileStateRepo
+from nq.config import load_config
+from nq.repo import DatabaseStateRepo, FileStateRepo
 from tools.dataingestor.service.industry_member_sync_service import IndustryMemberSyncService
 
 # Configure logging

@@ -62,7 +62,7 @@ python python/tools/analysis/evaluate_rsi_multi_signal_strategy.py \
 ### 输出说明
 - 结果 CSV：默认 `rsi_multi_signal_results.csv`，可用 `--output` 修改。
 - 排序字段：默认 `total_return`，可用 `--sort-by` 调整，`--ascending` 控制排序方向。
-- 支持 `kline_type`、初始资金、滑点、佣金等通用参数（见 `python/atm/analysis/backtest/common_args.py`）。
+- 支持 `kline_type`、初始资金、滑点、佣金等通用参数（见 `python/nq/analysis/backtest/common_args.py`）。
 
 ## 实战要点
 - 信号组合用“或”逻辑：满足任一买入（或卖出）条件即行动，避免错过。

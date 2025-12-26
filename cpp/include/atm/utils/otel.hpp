@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace atm {
+namespace nq {
 namespace utils {
 namespace otel {
 
@@ -166,5 +166,5 @@ private:
 
 } // namespace otel
 } // namespace utils
-} // namespace atm
+} // namespace nq
 

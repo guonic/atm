@@ -100,7 +100,7 @@ go build ./pkg/utils/otel/...
 ### Python ✅
 ```bash
 cd python
-python -c "from atm.utils.otel import initialize_otel; print('OK')"
+python -c "from nq.utils.otel import initialize_otel; print('OK')"
 # 输出: OK（即使没有安装 OpenTelemetry）
 ```
 

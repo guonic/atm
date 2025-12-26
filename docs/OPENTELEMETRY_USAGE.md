@@ -17,8 +17,8 @@
 
 ```python
 # python/tools/dataingestor/service/stock_ingestor_service.py
-from atm.utils.otel import get_tracer
-from atm.utils.otel_helpers import trace_span, MetricsCounter
+from nq.utils.otel import get_tracer
+from nq.utils.otel_helpers import trace_span, MetricsCounter
 
 class StockIngestorService:
     def __init__(self):
@@ -46,8 +46,8 @@ class StockIngestorService:
 
 ```python
 # python/atm/api/rest/main.py
-from atm.utils.otel import initialize_otel, get_tracer
-from atm.utils.otel_helpers import trace_function
+from nq.utils.otel import initialize_otel, get_tracer
+from nq.utils.otel_helpers import trace_function
 
 # 在应用启动时初始化
 initialize_otel()
@@ -66,7 +66,7 @@ def create_order(request):
 
 ```python
 # python/atm/trading/strategy/backtrader_strategy.py
-from atm.utils.otel_helpers import record_duration, trace_span
+from nq.utils.otel_helpers import record_duration, trace_span
 
 class BacktraderStrategy:
     @record_duration("strategy.backtest.duration", attributes={"strategy": "sma_cross"})
@@ -152,22 +152,22 @@ func ExecuteOrder(ctx context.Context, order *Order) error {
 
 ```cpp
 // cpp/src/trading/strategy.cpp
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 
 void ExecuteStrategy(const StrategyConfig& config) {
-    if (!atm::utils::otel::IsEnabled()) {
+    if (!nq::utils::otel::IsEnabled()) {
         // 不启用时，直接执行原有逻辑
         ExecuteStrategyInternal(config);
         return;
     }
     
-    auto tracer = atm::utils::otel::GetTracer("atm.trading.strategy");
+    auto tracer = nq::utils::otel::GetTracer("nexusquant.trading.strategy");
     auto span = tracer->StartSpan("strategy.execute", {
         {"strategy.name", config.name},
         {"strategy.type", config.type},
     });
     
-    atm::utils::otel::SpanScope span_scope(std::move(span));
+    nq::utils::otel::SpanScope span_scope(std::move(span));
     
     try {
         ExecuteStrategyInternal(config);

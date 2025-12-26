@@ -1,4 +1,4 @@
-# ATM - Automated Trading Machine
+# NexusQuant
 
 量化交易系统，支持 Python、Golang、C++ 混合开发。
 
@@ -22,7 +22,7 @@
 1. **克隆项目**
 ```bash
 git clone <repository-url>
-cd atm
+cd nexusquant
 ```
 
 2. **创建并激活 Python 虚拟环境**
@@ -60,11 +60,11 @@ make install-hooks
 ```bash
 make storage-start
 # 或者
-./scripts/atm storage start
+./scripts/nq storage start
 
 # 同步股票基础信息（覆盖模式）
 export TUSHARE_TOKEN=your_tushare_token
-./scripts/atm sync stock-basic
+./scripts/nq sync stock-basic
 ```
 
 5. **构建项目**

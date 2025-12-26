@@ -35,9 +35,9 @@ import logging
 import os
 from datetime import datetime
 
-from atm.analysis.backtest import BacktestReport, StrategyBacktester
-from atm.config import load_config
-from atm.trading.strategies import SMACrossStrategy
+from nq.analysis.backtest import BacktestReport, StrategyBacktester
+from nq.config import load_config
+from nq.trading.strategies import SMACrossStrategy
 
 # Configure logging
 logging.basicConfig(

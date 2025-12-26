@@ -1,6 +1,6 @@
 # Commit 提交规范
 
-本文档定义了 ATM 项目的 Git 提交信息规范，遵循 [Conventional Commits](https://www.conventionalcommits.org/) 标准。
+本文档定义了 NexusQuant 项目的 Git 提交信息规范，遵循 [Conventional Commits](https://www.conventionalcommits.org/) 标准。
 
 ## 提交信息格式
 

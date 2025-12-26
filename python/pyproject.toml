@@ -5,14 +5,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "atm"
+name = "nexusquant"
 version = "0.1.0"
-description = "Automated Trading Machine - 量化交易系统"
+description = "NexusQuant - 量化交易系统"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "ATM Team"}
+    {name = "NexusQuant Team"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -70,11 +70,11 @@ kronos = [
 ]
 
 [project.scripts]
-atm = "atm.cli:main"
+nq = "nq.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["atm*"]
+include = ["nq*"]
 
 [tool.black]
 line-length = 100

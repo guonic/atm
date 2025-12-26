@@ -38,7 +38,7 @@ DEBUG - Skipping record with missing required fields: ts_code=, symbol=, name=
 - 外键约束失败
 
 **解决方案**：
-- 检查数据库连接：`./scripts/atm storage status`
+- 检查数据库连接：`./scripts/nq storage status`
 - 查看数据库日志
 - 检查表结构和约束
 - 确认使用正确的同步模式（upsert/append）
@@ -104,7 +104,7 @@ HAVING COUNT(*) > 1;
 #### 分析错误模式
 
 ```python
-from atm.repo import FileStateRepo, IngestionState
+from nq.repo import FileStateRepo, IngestionState
 
 # 查看任务状态
 state_repo = FileStateRepo(state_dir="storage/state")

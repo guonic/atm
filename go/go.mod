@@ -1,4 +1,4 @@
-module github.com/atm/atm
+module github.com/nexusquant/nq
 
 go 1.21
 

@@ -37,10 +37,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from huggingface_hub import constants
 
-from atm.ai.kronos import Kronos, KronosPredictor, KronosTokenizer
-from atm.config import load_config
-from atm.repo.kline_repo import StockKlineDayRepo
-from atm.repo.trading_calendar_repo import TradingCalendarRepo
+from nq.ai.kronos import Kronos, KronosPredictor, KronosTokenizer
+from nq.config import load_config
+from nq.repo.kline_repo import StockKlineDayRepo
+from nq.repo.trading_calendar_repo import TradingCalendarRepo
 
 # Configure logging
 logging.basicConfig(

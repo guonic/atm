@@ -1,4 +1,4 @@
-// Package otel provides OpenTelemetry integration for ATM project.
+// Package otel provides OpenTelemetry integration for NexusQuant project.
 // Supports logs, metrics, and traces following OpenTelemetry standards.
 package otel
 
@@ -38,19 +38,19 @@ type Config struct {
 
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() *Config {
-	enabled, _ := strconv.ParseBool(getEnv("ATM_OTEL_ENABLED", "false"))
-	traceSampling, _ := strconv.ParseFloat(getEnv("ATM_OTEL_TRACE_SAMPLING", "1.0"), 64)
-	logsEnabled, _ := strconv.ParseBool(getEnv("ATM_OTEL_LOGS_ENABLED", "true"))
-	metricsEnabled, _ := strconv.ParseBool(getEnv("ATM_OTEL_METRICS_ENABLED", "true"))
-	tracesEnabled, _ := strconv.ParseBool(getEnv("ATM_OTEL_TRACES_ENABLED", "true"))
-	metricsInterval, _ := time.ParseDuration(getEnv("ATM_OTEL_METRICS_INTERVAL", "5s"))
+	enabled, _ := strconv.ParseBool(getEnv("NQ_OTEL_ENABLED", "false"))
+	traceSampling, _ := strconv.ParseFloat(getEnv("NQ_OTEL_TRACE_SAMPLING", "1.0"), 64)
+	logsEnabled, _ := strconv.ParseBool(getEnv("NQ_OTEL_LOGS_ENABLED", "true"))
+	metricsEnabled, _ := strconv.ParseBool(getEnv("NQ_OTEL_METRICS_ENABLED", "true"))
+	tracesEnabled, _ := strconv.ParseBool(getEnv("NQ_OTEL_TRACES_ENABLED", "true"))
+	metricsInterval, _ := time.ParseDuration(getEnv("NQ_OTEL_METRICS_INTERVAL", "5s"))
 
 	return &Config{
 		Enabled:         enabled,
-		Endpoint:        getEnv("ATM_OTEL_ENDPOINT", "localhost:4317"),
-		ServiceName:     getEnv("ATM_SERVICE_NAME", "atm"),
-		ServiceVersion:  getEnv("ATM_SERVICE_VERSION", "0.1.0"),
-		Environment:     getEnv("ATM_ENVIRONMENT", "development"),
+		Endpoint:        getEnv("NQ_OTEL_ENDPOINT", "localhost:4317"),
+		ServiceName:     getEnv("NQ_SERVICE_NAME", "nexusquant"),
+		ServiceVersion:  getEnv("NQ_SERVICE_VERSION", "0.1.0"),
+		Environment:     getEnv("NQ_ENVIRONMENT", "development"),
 		TraceSampling:   traceSampling,
 		LogsEnabled:     logsEnabled,
 		MetricsEnabled:  metricsEnabled,

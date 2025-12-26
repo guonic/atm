@@ -15,8 +15,8 @@ Usage:
 import argparse
 import logging
 
-from atm.config import load_config
-from atm.trading.strategies import (
+from nq.config import load_config
+from nq.trading.strategies import (
     SMACrossStrategy,
     StrategyRunner,
     create_strategy_parser,

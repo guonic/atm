@@ -90,22 +90,22 @@
 ### 5. 命令框架集成
 
 #### 已注册的命令
-- `atm sync industry-classify` - 同步申万行业分类
-- `atm sync industry-member` - 同步申万行业成分
+- `nq sync industry-classify` - 同步申万行业分类
+- `nq sync industry-member` - 同步申万行业成分
 
 #### 使用示例
 ```bash
 # 同步申万行业分类 (SW2021)
-atm sync industry-classify --src SW2021
+nq sync industry-classify --src SW2021
 
 # 同步申万行业成分（所有股票）
-atm sync industry-member
+nq sync industry-member
 
 # 按 L3 行业代码同步
-atm sync industry-member --l3-code 850531.SI
+nq sync industry-member --l3-code 850531.SI
 
 # 同步历史数据
-atm sync industry-member --is-new N
+nq sync industry-member --is-new N
 ```
 
 ## 数据库表结构
@@ -182,20 +182,20 @@ CREATE INDEX idx_stock_industry_member_is_new ON stock_industry_member(is_new);
 
 ```bash
 # 1. 先同步行业分类（建立行业层级结构）
-atm sync industry-classify --src SW2021
+nq sync industry-classify --src SW2021
 
 # 2. 再同步行业成分（建立股票-行业关联）
-atm sync industry-member
+nq sync industry-member
 ```
 
 ### 日常同步
 
 ```bash
 # 行业分类（低频更新，按需同步）
-atm sync industry-classify --src SW2021
+nq sync industry-classify --src SW2021
 
 # 行业成分（中频更新，定期同步）
-atm sync industry-member
+nq sync industry-member
 ```
 
 ## 数据查询示例
@@ -203,8 +203,8 @@ atm sync industry-member
 ### 查询行业分类
 
 ```python
-from atm.repo import StockIndustryClassifyRepo
-from atm.config import load_config
+from nq.repo import StockIndustryClassifyRepo
+from nq.config import load_config
 
 config = load_config()
 repo = StockIndustryClassifyRepo(config.database)
@@ -219,8 +219,8 @@ sub_industries = repo.get_by_parent("801050.SI", src="SW2021")
 ### 查询行业成分
 
 ```python
-from atm.repo import StockIndustryMemberRepo
-from atm.config import load_config
+from nq.repo import StockIndustryMemberRepo
+from nq.config import load_config
 
 config = load_config()
 repo = StockIndustryMemberRepo(config.database)

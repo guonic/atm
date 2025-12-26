@@ -1,9 +1,9 @@
-#include "atm/utils/otel.hpp"
+#include "nq/utils/otel.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
-namespace atm {
+namespace nq {
 namespace utils {
 namespace otel {
 
@@ -11,27 +11,27 @@ Config LoadConfig() {
     Config config;
     
     // Load from environment variables
-    const char* enabled = std::getenv("ATM_OTEL_ENABLED");
+    const char* enabled = std::getenv("NQ_OTEL_ENABLED");
     if (enabled != nullptr && std::string(enabled) == "true") {
         config.enabled = true;
     }
     
-    const char* endpoint = std::getenv("ATM_OTEL_ENDPOINT");
+    const char* endpoint = std::getenv("NQ_OTEL_ENDPOINT");
     if (endpoint != nullptr) {
         config.endpoint = std::string(endpoint);
     }
     
-    const char* service_name = std::getenv("ATM_SERVICE_NAME");
+    const char* service_name = std::getenv("NQ_SERVICE_NAME");
     if (service_name != nullptr) {
         config.service_name = std::string(service_name);
     }
     
-    const char* service_version = std::getenv("ATM_SERVICE_VERSION");
+    const char* service_version = std::getenv("NQ_SERVICE_VERSION");
     if (service_version != nullptr) {
         config.service_version = std::string(service_version);
     }
     
-    const char* environment = std::getenv("ATM_ENVIRONMENT");
+    const char* environment = std::getenv("NQ_ENVIRONMENT");
     if (environment != nullptr) {
         config.environment = std::string(environment);
     }
@@ -155,5 +155,5 @@ std::unique_ptr<Meter> GetMeter(const std::string& name) {
 
 } // namespace otel
 } // namespace utils
-} // namespace atm
+} // namespace nq
 
