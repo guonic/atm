@@ -67,8 +67,42 @@ FREQ_MAPPING = {
 
 
 def convert_ts_code_to_qlib_format(ts_code: str) -> str:
-    """Convert ts_code (e.g., 000001.SZ) to Qlib format (e.g., 000001)."""
-    return ts_code.split(".")[0]
+    """
+    Convert ts_code to Qlib format, keeping exchange suffix.
+    
+    This function ensures the code format is consistent with the data.
+    Qlib code format: '000001.SZ', '600000.SH' (with exchange suffix).
+    
+    Args:
+        ts_code: Stock code in format like '000001.SZ', '600000.SH', 'sh.000001', or 'sz.000001'
+    
+    Returns:
+        Qlib format code (e.g., '000001.SZ', '600000.SH') - consistent with data format
+    """
+    # Handle different input formats and normalize to '000001.SZ' format
+    if "." in ts_code:
+        parts = ts_code.split(".")
+        if len(parts) == 2:
+            # If format is 'sh.000001' or 'sz.000001', convert to '000001.SH' or '000001.SZ'
+            if parts[0].lower() in ["sh", "sz", "bj"]:
+                exchange = parts[0].upper()
+                if exchange == "SH":
+                    return f"{parts[1]}.SH"
+                elif exchange == "SZ":
+                    return f"{parts[1]}.SZ"
+                elif exchange == "BJ":
+                    return f"{parts[1]}.BJ"
+            # If format is '000001.SZ' or '600000.SH', keep as is
+            return ts_code.upper()
+    # If no dot, assume it's a pure code and try to determine exchange
+    # For codes starting with 6, assume SH; for others starting with 0/3, assume SZ
+    if ts_code.startswith("6"):
+        return f"{ts_code}.SH"
+    elif ts_code.startswith(("0", "3")):
+        return f"{ts_code}.SZ"
+    else:
+        # Default to SZ if cannot determine
+        return f"{ts_code}.SZ"
 
 
 def get_last_export_time(csv_file: Path) -> Optional[datetime]:
@@ -103,7 +137,11 @@ def get_last_export_time(csv_file: Path) -> Optional[datetime]:
             
             # Parse date from first column
             date_str = last_line.split(",")[0]
-            return pd.to_datetime(date_str, errors="coerce")
+            parsed_date = pd.to_datetime(date_str, errors="coerce")
+            if pd.isna(parsed_date):
+                logger.warning(f"Failed to parse date from CSV file {csv_file}: {date_str}")
+                return None
+            return parsed_date
     except Exception as e:
         logger.warning(f"Failed to read last export time from {csv_file}: {e}")
         return None
@@ -189,7 +227,15 @@ def export_stock_to_csv(
         )
         
         if not klines:
-            logger.debug(f"No data found for {ts_code}")
+            # Check if this is a same-day query (might not have data yet)
+            if start_date and end_date and start_date.date() == end_date.date():
+                logger.debug(f"No data found for {ts_code} on {start_date.date()} (data might not be available yet)")
+            else:
+                logger.warning(f"No data found for {ts_code} (start_date={start_date}, end_date={end_date})")
+                logger.warning(f"  This may indicate:")
+                logger.warning(f"  1. Stock {ts_code} is not in the database")
+                logger.warning(f"  2. Stock {ts_code} has no data in the specified date range")
+                logger.warning(f"  3. Stock {ts_code} may be delisted or suspended")
             return False, None
         
         # Convert to DataFrame
@@ -249,10 +295,12 @@ def export_stock_to_csv(
         # Get last date
         last_date = pd.to_datetime(qlib_df["date"].iloc[-1])
         
-        # Convert ts_code to Qlib format
+        # Convert ts_code to Qlib format (ensure consistency with data)
+        # The code format must match what dump_bin will extract from filename
         qlib_code = convert_ts_code_to_qlib_format(ts_code)
         
         # Save to CSV (ensure column order: date, open, high, low, close, volume, factor)
+        # CSV filename uses Qlib format code to ensure consistency with dump_bin extraction
         csv_file = output_dir / f"{qlib_code}.csv"
         column_order = ["date", "open", "high", "low", "close", "volume", "factor"]
         qlib_df = qlib_df[column_order]
@@ -280,7 +328,7 @@ def export_stock_to_csv(
         return False, None
 
 
-def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str) -> bool:
+def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str, ts_codes: Optional[List[str]] = None) -> bool:
     """
     Convert CSV files to Qlib bin format.
     
@@ -288,6 +336,7 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str) -> bool:
         csv_dir: Directory containing CSV files.
         qlib_dir: Output directory for Qlib bin files.
         freq: Frequency string for Qlib (e.g., 'day', 'week').
+        ts_codes: Optional list of stock codes to convert. If None, converts all CSV files.
         
     Returns:
         True if conversion successful, False otherwise.
@@ -297,13 +346,28 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str) -> bool:
     logger.info(f"CSV directory: {csv_dir}")
     logger.info(f"Qlib directory: {qlib_dir}")
     logger.info(f"Frequency: {freq}")
+    if ts_codes:
+        logger.info(f"Converting {len(ts_codes)} specified stocks")
+    else:
+        logger.info("Converting all CSV files in directory")
     logger.info("=" * 80)
     
-    # Validate CSV files before conversion
-    csv_files = list(csv_dir.glob("*.csv"))
-    if not csv_files:
-        logger.error("No CSV files found in directory")
-        return False
+    # Get CSV files to convert
+    if ts_codes:
+        # Only convert CSV files for specified stocks
+        qlib_codes = [convert_ts_code_to_qlib_format(ts_code) for ts_code in ts_codes]
+        csv_files = [csv_dir / f"{code}.csv" for code in qlib_codes]
+        # Filter to only existing files
+        csv_files = [f for f in csv_files if f.exists()]
+        if not csv_files:
+            logger.error(f"No CSV files found for specified stocks: {ts_codes}")
+            return False
+    else:
+        # Convert all CSV files in directory
+        csv_files = list(csv_dir.glob("*.csv"))
+        if not csv_files:
+            logger.error("No CSV files found in directory")
+            return False
     
     logger.info(f"Validating {len(csv_files)} CSV files...")
     invalid_files = []
@@ -327,9 +391,24 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str) -> bool:
     
     logger.info("✓ All CSV files have correct format (7 columns including factor)")
     
+    # If only converting specific stocks, create a temporary directory with only those CSV files
+    temp_csv_dir = None
     try:
+        if ts_codes and len(csv_files) < len(list(csv_dir.glob("*.csv"))):
+            # Create temporary directory with only the CSV files we want to convert
+            import tempfile
+            import shutil
+            temp_csv_dir = Path(tempfile.mkdtemp(prefix="qlib_export_"))
+            logger.info(f"Creating temporary directory with {len(csv_files)} CSV files: {temp_csv_dir}")
+            for csv_file in csv_files:
+                shutil.copy2(csv_file, temp_csv_dir / csv_file.name)
+            data_path = str(temp_csv_dir)
+        else:
+            # Use original directory (all files or already filtered)
+            data_path = str(csv_dir)
+        
         dumper = DumpDataAll(
-            data_path=str(csv_dir),
+            data_path=data_path,
             qlib_dir=str(qlib_dir),
             freq=freq,
             max_workers=4,
@@ -373,6 +452,15 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to convert CSV to Qlib bin format: {e}", exc_info=True)
         return False
+    finally:
+        # Clean up temporary directory if created
+        if temp_csv_dir and temp_csv_dir.exists():
+            import shutil
+            try:
+                shutil.rmtree(temp_csv_dir)
+                logger.debug(f"Cleaned up temporary directory: {temp_csv_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary directory {temp_csv_dir}: {e}")
 
 
 def export_qlib_data(
@@ -411,11 +499,19 @@ def export_qlib_data(
     
     # Load config if not provided
     if config is None:
-        config = load_config()
+        full_config = load_config()
+        db_config = full_config.database
+    else:
+        # If config is already DatabaseConfig, use it directly
+        # Otherwise, extract database config from Config object
+        if isinstance(config, DatabaseConfig):
+            db_config = config
+        else:
+            db_config = config.database
     
     # Initialize repositories
-    repo = repo_class(config)
-    stock_repo = StockBasicRepo(config)
+    repo = repo_class(db_config)
+    stock_repo = StockBasicRepo(db_config)
     
     # Get stock list
     if ts_codes is None:
@@ -453,9 +549,19 @@ def export_qlib_data(
                 if last_export_time:
                     # Start from next day after last export
                     stock_start_date = last_export_time + timedelta(days=1)
-                    logger.debug(f"{ts_code}: Incremental export from {stock_start_date.strftime('%Y-%m-%d')}")
+                    logger.info(f"{ts_code}: Incremental export from {stock_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+                    
+                    # Check if start_date is after end_date (no new data)
+                    if stock_start_date > end_date:
+                        logger.info(f"{ts_code}: No new data to export (last export: {last_export_time.strftime('%Y-%m-%d')}, end_date: {end_date.strftime('%Y-%m-%d')})")
+                        exported_count += 1  # Count as success (no new data is not a failure)
+                        continue
+                    
+                    # Check if start_date equals end_date (same day, might not have data yet)
+                    if stock_start_date.date() == end_date.date():
+                        logger.info(f"{ts_code}: Exporting same day data (might not be available yet)")
                 else:
-                    logger.debug(f"{ts_code}: Full export (no previous export found)")
+                    logger.info(f"{ts_code}: Full export (no previous export found)")
             
             # Export stock data
             success, last_date = export_stock_to_csv(
@@ -476,10 +582,15 @@ def export_qlib_data(
                     csv_file = csv_dir / f"{qlib_code}.csv"
                     cleanup_csv_file(csv_file)
             else:
-                failed_count += 1
+                # Check if this is a same-day incremental export with no data (not a real failure)
+                if incremental and stock_start_date and end_date and stock_start_date.date() == end_date.date():
+                    logger.info(f"{ts_code}: No new data available for today (this is normal, not a failure)")
+                    exported_count += 1  # Count as success (no data for today is expected)
+                else:
+                    failed_count += 1
                 
         except Exception as e:
-            logger.error(f"Failed to export {ts_code}: {e}")
+            logger.error(f"Failed to export {ts_code}: {type(e).__name__}: {e}", exc_info=True)
             failed_count += 1
     
     logger.info(f"Export completed: {exported_count} stocks exported, {failed_count} failed")
@@ -488,9 +599,9 @@ def export_qlib_data(
         logger.error("No stocks exported successfully")
         return False
     
-    # Convert CSV to Qlib bin format
+    # Convert CSV to Qlib bin format (only for exported stocks)
     qlib_output_dir = qlib_dir / "qlib_data" / "cn_data"
-    if not convert_csv_to_qlib_bin(csv_dir, qlib_output_dir, qlib_freq):
+    if not convert_csv_to_qlib_bin(csv_dir, qlib_output_dir, qlib_freq, ts_codes=ts_codes):
         logger.error("Failed to convert CSV to Qlib bin format")
         return False
     
@@ -610,11 +721,14 @@ Supported frequencies:
         end_date = pd.to_datetime(args.end_date)
     
     # Load config
-    config = None
+    full_config = None
     if args.config:
-        config = load_config(args.config)
+        full_config = load_config(args.config)
     else:
-        config = load_config()
+        full_config = load_config()
+    
+    # Extract database config
+    db_config = full_config.database
     
     # Export data
     success = export_qlib_data(
@@ -626,7 +740,7 @@ Supported frequencies:
         end_date=end_date,
         incremental=args.incremental,
         cleanup_csv=args.cleanup_csv,
-        config=config,
+        config=db_config,
     )
     
     sys.exit(0 if success else 1)

@@ -162,11 +162,11 @@ Qlib 数据目录的标准结构如下：
 
 ### 在 ATM 项目中使用
 
-我们的 `export_to_qlib.py` 工具已经实现了与 Qlib 官方工具的集成：
+我们的 `export_qlib.py` 工具已经实现了与 Qlib 的集成：
 
-1. **优先使用官方工具**: 自动检测并使用 `qlib.tools.dump_bin`
-2. **多方法回退**: 如果官方工具不可用，提供手动转换方法
-3. **格式兼容**: 确保 CSV 格式符合 Qlib 要求
+1. **使用项目 dump_bin 工具**: 直接使用项目自带的 `dump_bin.py`，不依赖系统 qlib
+2. **格式兼容**: 确保 CSV 格式符合 Qlib 要求（包含 factor 字段）
+3. **多频率支持**: 支持 day, week, month, quarter, hour, 30min, 15min, 5min, 1min
 
 ### 最佳实践
 
@@ -253,7 +253,7 @@ python -m qlib.tools.dump_bin dump_all \
 **解决方案**:
 1. 升级 qlib: `pip install --upgrade pyqlib`
 2. 检查安装路径: `python -c "import qlib; print(qlib.__file__)"`
-3. 使用手动转换方法（`export_to_qlib.py` 已实现）
+3. 使用项目导出工具: `python python/tools/qlib/export_qlib.py --freq day`
 
 ### Q2: CSV 转换后数据为空或 NaN？
 
@@ -375,5 +375,6 @@ python python/tools/qlib/verify_exported_data.py
 
 - [OFFICIAL_TOOLS.md](./OFFICIAL_TOOLS.md) - 官方工具使用方法
 - [README.md](./README.md) - Qlib 数据导出工具说明
-- [export_to_qlib.py](./export_to_qlib.py) - 数据导出工具实现
+- [export_qlib.py](../tools/qlib/export_qlib.py) - 数据导出工具实现（主入口）
+- [export_single_stock.py](../tools/qlib/export_single_stock.py) - 单股票导出工具
 

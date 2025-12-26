@@ -17,6 +17,35 @@ from loguru import logger
 from qlib.utils import fname_to_code, code_to_fname
 
 
+def normalize_stock_code(code: str) -> str:
+    """
+    Normalize stock code, keeping exchange suffix if present.
+    
+    This function ensures code format consistency with the data.
+    Qlib code format: '000001.SZ', '600000.SH' (with exchange suffix).
+    
+    Args:
+        code: Stock code in various formats (e.g., '000001.SZ', '600000.SH', '000001', 'sh.000001').
+    
+    Returns:
+        Normalized code in format '000001.SZ' or '600000.SH' (with exchange suffix).
+    """
+    code_str = str(code).strip()
+    
+    # If already has exchange suffix (e.g., '000001.SZ'), keep it
+    if '.' in code_str:
+        parts = code_str.split('.')
+        if len(parts) == 2 and parts[1].upper() in ['SH', 'SZ', 'BJ']:
+            return f"{parts[0]}.{parts[1].upper()}"
+        # If format is 'sh.000001' or 'sz.000001', convert to '000001.SH' or '000001.SZ'
+        if len(parts) == 2 and parts[0].lower() in ['sh', 'sz', 'bj']:
+            exchange = parts[0].upper()
+            return f"{parts[1]}.{exchange}"
+    
+    # Otherwise, use fname_to_code for backward compatibility
+    return fname_to_code(code_str.lower()).upper()
+
+
 def read_as_df(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
     """
     Read a csv or parquet file into a pandas DataFrame.
@@ -36,7 +65,7 @@ def read_as_df(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
     file_path = Path(file_path).expanduser()
     suffix = file_path.suffix.lower()
 
-    keep_keys = {".csv": ("low_memory",)}
+    keep_keys = {".csv": ("low_memory", "header")}
     kept_kwargs = {}
     for k in keep_keys.get(suffix, []):
         if k in kwargs:
@@ -156,10 +185,19 @@ class DumpDataBase:
             _calendars = pd.Series(dtype=np.float32)
         else:
             _calendars = df[self.date_field_name]
+            # Ensure dates are converted to pd.Timestamp
+            if _calendars.dtype == 'object' or isinstance(_calendars.iloc[0] if len(_calendars) > 0 else None, str):
+                _calendars = pd.to_datetime(_calendars, errors='coerce')
+            # Remove NaT (invalid dates)
+            _calendars = _calendars.dropna()
 
         if is_begin_end and as_set:
+            if len(_calendars) == 0:
+                return (pd.NaT, pd.NaT), set()
             return (_calendars.min(), _calendars.max()), set(_calendars)
         elif is_begin_end:
+            if len(_calendars) == 0:
+                return pd.NaT, pd.NaT
             return _calendars.min(), _calendars.max()
         elif as_set:
             return set(_calendars)
@@ -167,7 +205,7 @@ class DumpDataBase:
             return _calendars.tolist()
 
     def _get_source_data(self, file_path: Path) -> pd.DataFrame:
-        df = read_as_df(file_path, low_memory=False)
+        df = read_as_df(file_path, low_memory=False, header=None)
         # If CSV has no header and date_field_name not in columns, assume standard Qlib format
         if self.date_field_name not in df.columns.tolist():
             # Check if first row looks like a date (YYYY-MM-DD format)
@@ -193,7 +231,14 @@ class DumpDataBase:
         return df
 
     def get_symbol_from_file(self, file_path: Path) -> str:
-        return fname_to_code(file_path.stem.strip().lower())
+        """
+        Extract symbol from file name, keeping exchange suffix if present.
+        
+        For files like '000001.SZ.csv', returns '000001.SZ' (not '000001').
+        This ensures code format consistency with the data.
+        """
+        stem = file_path.stem.strip()
+        return normalize_stock_code(stem)
 
     def get_dump_fields(self, df_columns: Iterable[str]) -> Iterable[str]:
         return (
@@ -236,9 +281,7 @@ class DumpDataBase:
         if isinstance(instruments_data, pd.DataFrame):
             _df_fields = [self.symbol_field_name, self.INSTRUMENTS_START_FIELD, self.INSTRUMENTS_END_FIELD]
             instruments_data = instruments_data.loc[:, _df_fields]
-            instruments_data[self.symbol_field_name] = instruments_data[self.symbol_field_name].apply(
-                lambda x: fname_to_code(x.lower()).upper()
-            )
+            instruments_data[self.symbol_field_name] = instruments_data[self.symbol_field_name].apply(normalize_stock_code)
             instruments_data.to_csv(instruments_path, header=False, sep=self.INSTRUMENTS_SEP, index=False)
         else:
             np.savetxt(instruments_path, instruments_data, fmt="%s", encoding="utf-8")
@@ -303,7 +346,9 @@ class DumpDataBase:
         if isinstance(file_or_data, pd.DataFrame):
             if file_or_data.empty:
                 return
-            code = fname_to_code(str(file_or_data.iloc[0][self.symbol_field_name]).lower())
+            # Extract code, keeping exchange suffix if present
+            code_str = str(file_or_data.iloc[0][self.symbol_field_name]).strip()
+            code = normalize_stock_code(code_str)
             df = file_or_data
         elif isinstance(file_or_data, Path):
             code = self.get_symbol_from_file(file_or_data)
@@ -341,21 +386,34 @@ class DumpDataAll(DumpDataBase):
                 for file_path, ((_begin_time, _end_time), _set_calendars) in zip(
                     self.df_files, executor.map(_fun, self.df_files)
                 ):
-                    all_datetime = all_datetime | _set_calendars
-                    if isinstance(_begin_time, pd.Timestamp) and isinstance(_end_time, pd.Timestamp):
+                    if _set_calendars:
+                        all_datetime = all_datetime | _set_calendars
+                    if isinstance(_begin_time, pd.Timestamp) and isinstance(_end_time, pd.Timestamp) and not pd.isna(_begin_time) and not pd.isna(_end_time):
                         _begin_time = self._format_datetime(_begin_time)
                         _end_time = self._format_datetime(_end_time)
                         symbol = self.get_symbol_from_file(file_path)
                         _inst_fields = [symbol.upper(), _begin_time, _end_time]
                         date_range_list.append(f"{self.INSTRUMENTS_SEP.join(_inst_fields)}")
+                    elif not _set_calendars:
+                        logger.warning(f"No dates found in {file_path.name}")
                     p_bar.update()
         self._kwargs["all_datetime_set"] = all_datetime
         self._kwargs["date_range_list"] = date_range_list
-        logger.info("end of get all date.\n")
+        logger.info(f"end of get all date. Found {len(all_datetime)} unique dates from {len(date_range_list)} files.\n")
 
     def _dump_calendars(self):
         logger.info("start dump calendars......")
-        self._calendars_list = sorted(map(pd.Timestamp, self._kwargs["all_datetime_set"]))
+        all_datetime_set = self._kwargs.get("all_datetime_set", set())
+        if not all_datetime_set:
+            logger.warning("all_datetime_set is empty! No dates found in CSV files.")
+            logger.warning("This may indicate:")
+            logger.warning("1. CSV files have no date column or date column is empty")
+            logger.warning("2. Date format in CSV files cannot be parsed")
+            logger.warning("3. All CSV files are empty or invalid")
+            self._calendars_list = []
+        else:
+            self._calendars_list = sorted(map(pd.Timestamp, all_datetime_set))
+            logger.info(f"Generated calendar with {len(self._calendars_list)} dates")
         self.save_calendars(self._calendars_list)
         logger.info("end of calendars dump.\n")
 
@@ -524,7 +582,8 @@ class DumpDataUpdate(DumpDataBase):
         with ProcessPoolExecutor(max_workers=self.works) as executor:
             futures = {}
             for _code, _df in self._all_data.groupby(self.symbol_field_name, group_keys=False):
-                _code = fname_to_code(str(_code).lower()).upper()
+                # Normalize code, keeping exchange suffix if present
+                _code = normalize_stock_code(_code)
                 _start, _end = self._get_date(_df, is_begin_end=True)
                 if not (isinstance(_start, pd.Timestamp) and isinstance(_end, pd.Timestamp)):
                     continue
