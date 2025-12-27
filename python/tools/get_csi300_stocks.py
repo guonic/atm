@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-获取 CSI300（沪深300）股票代码列表的工具。
+Get CSI index stock lists (CSI100, CSI300, CSI500).
 
-支持从 Tushare API 或数据库获取 CSI300 成分股列表。
+Supports fetching stock lists from Tushare API or database.
+Can export individual index lists or a combined list.
 """
 
 import argparse
@@ -10,7 +11,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 # Add project root to path
 _project_root = Path(__file__).parent.parent.parent
@@ -31,18 +32,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Index code mapping
+INDEX_CODES = {
+    "csi100": "000903.SH",  # CSI100 (中证100)
+    "csi300": "000300.SH",  # CSI300 (沪深300)
+    "csi500": "000905.SH",  # CSI500 (中证500)
+}
 
-def get_csi300_from_tushare(tushare_token: str, trade_date: Optional[str] = None) -> List[str]:
+
+def get_index_stocks_from_tushare(
+    tushare_token: str, index_name: str, trade_date: Optional[str] = None
+) -> List[str]:
     """
-    从 Tushare API 获取 CSI300 成分股列表。
+    Get index component stocks from Tushare API.
 
     Args:
         tushare_token: Tushare Pro API token.
-        trade_date: 交易日期 (YYYYMMDD)，如果为空则获取最新数据。
+        index_name: Index name (csi100, csi300, or csi500).
+        trade_date: Trade date (YYYYMMDD), if None then get latest data.
 
     Returns:
-        CSI300 股票代码列表（格式：000001.SZ）。
+        List of stock codes (format: 000001.SZ).
     """
+    if index_name not in INDEX_CODES:
+        logger.error(f"Unknown index name: {index_name}. Supported: {list(INDEX_CODES.keys())}")
+        return []
+
+    index_code = INDEX_CODES[index_name]
     config = TushareSourceConfig(
         token=tushare_token,
         type="tushare",
@@ -50,60 +66,54 @@ def get_csi300_from_tushare(tushare_token: str, trade_date: Optional[str] = None
     source = TushareSource(config)
 
     try:
-        # CSI300 指数代码：000300.SH
-        index_code = "000300.SH"
-
-        # 方法1: 使用 index_weight 接口获取指数成分股权重
-        # 这个接口可以获取指定日期的指数成分股
         params = {
             "index_code": index_code,
         }
         if trade_date:
             params["trade_date"] = trade_date
 
-        logger.info(f"Fetching CSI300 stocks from Tushare (index_code={index_code}, trade_date={trade_date or 'latest'})")
+        logger.info(
+            f"Fetching {index_name.upper()} stocks from Tushare "
+            f"(index_code={index_code}, trade_date={trade_date or 'latest'})"
+        )
 
         stocks = []
-        
-        # 方法1: 使用 index_weight 接口获取指数成分股权重（推荐）
-        # 这个接口返回指定日期的指数成分股及其权重
+
+        # Method 1: Use index_weight API to get index component weights (recommended)
         try:
             logger.info("Trying index_weight API...")
             records = list(source.fetch(api_name="index_weight", **params))
             if records:
-                # 提取股票代码（可能是 con_code 或 code 字段）
                 stocks = []
                 for record in records:
                     code = record.get("con_code") or record.get("code") or record.get("ts_code")
                     if code:
                         stocks.append(code)
-                
+
                 if stocks:
-                    # 去重并排序
                     stocks = sorted(list(set(stocks)))
-                    logger.info(f"✓ Fetched {len(stocks)} CSI300 stocks from index_weight API")
+                    logger.info(f"✓ Fetched {len(stocks)} {index_name.upper()} stocks from index_weight API")
                     return stocks
         except Exception as e:
             logger.warning(f"index_weight API failed: {e}")
 
-        # 方法2: 使用 index_dailybasic 接口（通常不包含成分股列表）
-        # 这个方法通常只返回指数本身的数据，不包含成分股
         logger.warning("index_weight not available, trying alternative methods...")
 
-        # 方法3: 如果没有指定日期，尝试获取最近的交易日
+        # Method 2: If no date specified, try to get recent trade date
         if not trade_date:
             try:
-                # 获取最近的交易日
-                cal_records = list(source.fetch(api_name="trade_cal", exchange="SSE", is_open="1", end_date="20241231"))
+                cal_records = list(
+                    source.fetch(api_name="trade_cal", exchange="SSE", is_open="1", end_date="20241231")
+                )
                 if cal_records:
-                    # 获取最近的交易日
-                    recent_dates = sorted([r.get("cal_date") for r in cal_records if r.get("cal_date")], reverse=True)
+                    recent_dates = sorted(
+                        [r.get("cal_date") for r in cal_records if r.get("cal_date")], reverse=True
+                    )
                     if recent_dates:
                         trade_date = recent_dates[0]
                         logger.info(f"Using recent trade date: {trade_date}")
                         params["trade_date"] = trade_date
-                        
-                        # 再次尝试 index_weight
+
                         records = list(source.fetch(api_name="index_weight", **params))
                         if records:
                             stocks = []
@@ -111,49 +121,54 @@ def get_csi300_from_tushare(tushare_token: str, trade_date: Optional[str] = None
                                 code = record.get("con_code") or record.get("code") or record.get("ts_code")
                                 if code:
                                     stocks.append(code)
-                            
+
                             if stocks:
                                 stocks = sorted(list(set(stocks)))
-                                logger.info(f"✓ Fetched {len(stocks)} CSI300 stocks using recent trade date")
+                                logger.info(
+                                    f"✓ Fetched {len(stocks)} {index_name.upper()} stocks using recent trade date"
+                                )
                                 return stocks
             except Exception as e:
                 logger.warning(f"Failed to get recent trade date: {e}")
 
         if not stocks:
-            logger.error("Failed to fetch CSI300 stocks from Tushare API")
+            logger.error(f"Failed to fetch {index_name.upper()} stocks from Tushare API")
             logger.info("Please check:")
-            logger.info("1. Tushare token is valid and has access to index_weight API")
-            logger.info("2. Index code is correct: 000300.SH")
+            logger.info(f"1. Tushare token is valid and has access to index_weight API")
+            logger.info(f"2. Index code is correct: {index_code}")
             logger.info("3. Trade date format is correct: YYYYMMDD")
             return []
 
         return stocks
 
     except Exception as e:
-        logger.error(f"Error fetching CSI300 stocks from Tushare: {e}", exc_info=True)
+        logger.error(f"Error fetching {index_name.upper()} stocks from Tushare: {e}", exc_info=True)
         return []
 
 
-def get_csi300_from_database(db_config: DatabaseConfig) -> List[str]:
+def get_index_stocks_from_database(
+    db_config: DatabaseConfig, index_name: str
+) -> List[str]:
     """
-    从数据库获取 CSI300 股票代码列表。
+    Get index component stocks from database.
 
-    注意：这需要数据库中已经有 CSI300 成分股数据。
-    如果没有，需要先通过 Tushare API 同步。
+    Note: This requires index component data to be already in the database.
+    If not, you need to sync from Tushare API first.
 
     Args:
-        db_config: 数据库配置。
+        db_config: Database configuration.
+        index_name: Index name (csi100, csi300, or csi500).
 
     Returns:
-        CSI300 股票代码列表。
+        List of stock codes.
     """
     from nq.repo.stock_repo import StockBasicRepo
 
     repo = StockBasicRepo(db_config)
 
-    # 这里需要根据实际的数据结构来查询
-    # 如果数据库中有指数成分股表，可以从那里查询
-    # 否则可能需要从其他数据源获取
+    # TODO: Implement database query based on actual schema
+    # If there's an index component table, query from there
+    # Otherwise, may need to get from other data sources
 
     logger.warning("Database method not fully implemented. Please use Tushare API method.")
     return []
@@ -161,11 +176,11 @@ def get_csi300_from_database(db_config: DatabaseConfig) -> List[str]:
 
 def save_to_file(stocks: List[str], output_file: Path) -> None:
     """
-    将股票代码列表保存到文件。
+    Save stock code list to file.
 
     Args:
-        stocks: 股票代码列表。
-        output_file: 输出文件路径。
+        stocks: List of stock codes.
+        output_file: Output file path.
     """
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -176,71 +191,162 @@ def save_to_file(stocks: List[str], output_file: Path) -> None:
     logger.info(f"Saved {len(stocks)} stocks to {output_file}")
 
 
+def combine_stock_lists(stock_lists: Dict[str, List[str]]) -> List[str]:
+    """
+    Combine multiple stock lists into one unique list.
+
+    Args:
+        stock_lists: Dictionary mapping index names to stock lists.
+
+    Returns:
+        Combined unique stock list.
+    """
+    all_stocks: Set[str] = set()
+    for index_name, stocks in stock_lists.items():
+        all_stocks.update(stocks)
+        logger.info(f"{index_name.upper()}: {len(stocks)} stocks")
+
+    combined = sorted(list(all_stocks))
+    logger.info(f"Combined total: {len(combined)} unique stocks")
+    return combined
+
+
 def main():
-    """主函数。"""
-    parser = argparse.ArgumentParser(description="获取 CSI300（沪深300）股票代码列表")
+    """Main function."""
+    parser = argparse.ArgumentParser(
+        description="Get CSI index stock lists (CSI100, CSI300, CSI500)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Get CSI300 stocks
+  python python/tools/get_csi300_stocks.py --index csi300
+
+  # Get all indices (CSI100, CSI300, CSI500) and combined list
+  python python/tools/get_csi300_stocks.py --all --output-dir ./stock_lists
+
+  # Get specific indices
+  python python/tools/get_csi300_stocks.py --index csi100 csi500 --output-dir ./stock_lists
+        """,
+    )
+    parser.add_argument(
+        "--index",
+        nargs="+",
+        choices=["csi100", "csi300", "csi500"],
+        default=["csi300"],
+        help="Index names to fetch (default: csi300). Can specify multiple: --index csi100 csi300 csi500",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Fetch all indices (CSI100, CSI300, CSI500) and generate combined list",
+    )
     parser.add_argument(
         "--source",
         choices=["tushare", "database"],
         default="tushare",
-        help="数据源：tushare 或 database（默认：tushare）",
+        help="Data source: tushare or database (default: tushare)",
     )
     parser.add_argument(
         "--token",
         type=str,
         default=os.getenv("TUSHARE_TOKEN", ""),
-        help="Tushare Pro API token（也可通过 TUSHARE_TOKEN 环境变量设置）",
+        help="Tushare Pro API token (can also be set via TUSHARE_TOKEN environment variable)",
     )
     parser.add_argument(
         "--trade-date",
         type=str,
         default=None,
-        help="交易日期 (YYYYMMDD)，如果为空则获取最新数据",
+        help="Trade date (YYYYMMDD), if None then get latest data",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=str,
         default=None,
-        help="输出文件路径（如果不指定则打印到控制台）",
+        help="Output directory for stock list files (if not specified, print to console)",
     )
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="配置文件路径（用于数据库方式）",
+        help="Config file path (for database method)",
     )
 
     args = parser.parse_args()
 
-    stocks: List[str] = []
+    # Determine which indices to fetch
+    if args.all:
+        indices_to_fetch = ["csi100", "csi300", "csi500"]
+    else:
+        indices_to_fetch = args.index
+
+    # Fetch stocks for each index
+    all_stock_lists: Dict[str, List[str]] = {}
 
     if args.source == "tushare":
         if not args.token:
-            logger.error("Tushare token is required. Set TUSHARE_TOKEN environment variable or use --token option.")
+            logger.error(
+                "Tushare token is required. Set TUSHARE_TOKEN environment variable or use --token option."
+            )
             sys.exit(1)
 
-        stocks = get_csi300_from_tushare(args.token, args.trade_date)
+        for index_name in indices_to_fetch:
+            logger.info(f"Fetching {index_name.upper()} stocks...")
+            stocks = get_index_stocks_from_tushare(args.token, index_name, args.trade_date)
+            if stocks:
+                all_stock_lists[index_name] = stocks
+            else:
+                logger.warning(f"Failed to fetch {index_name.upper()} stocks")
 
     elif args.source == "database":
         config = load_config(args.config) if args.config else load_config()
-        stocks = get_csi300_from_database(config.database)
+        for index_name in indices_to_fetch:
+            logger.info(f"Fetching {index_name.upper()} stocks from database...")
+            stocks = get_index_stocks_from_database(config.database, index_name)
+            if stocks:
+                all_stock_lists[index_name] = stocks
+            else:
+                logger.warning(f"Failed to fetch {index_name.upper()} stocks from database")
 
-    if not stocks:
+    if not all_stock_lists:
         logger.error("No stocks found. Please check your data source and parameters.")
         sys.exit(1)
 
-    # 输出结果
-    if args.output:
-        output_file = Path(args.output)
-        save_to_file(stocks, output_file)
-        print(f"\n✓ Successfully saved {len(stocks)} CSI300 stocks to {output_file}")
+    # Output results
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save individual index lists
+        for index_name, stocks in all_stock_lists.items():
+            output_file = output_dir / f"{index_name}.txt"
+            save_to_file(stocks, output_file)
+            print(f"✓ Saved {len(stocks)} {index_name.upper()} stocks to {output_file}")
+
+        # Generate combined list if multiple indices
+        if len(all_stock_lists) > 1:
+            combined_stocks = combine_stock_lists(all_stock_lists)
+            combined_file = output_dir / "csi_all.txt"
+            save_to_file(combined_stocks, combined_file)
+            print(f"✓ Saved {len(combined_stocks)} combined stocks to {combined_file}")
+
+        print(f"\n✓ Successfully exported {len(all_stock_lists)} index list(s) to {output_dir}")
     else:
-        print(f"\nCSI300 股票代码列表（共 {len(stocks)} 只）:")
-        print("=" * 60)
-        for i, stock in enumerate(sorted(stocks), 1):
-            print(f"{i:4d}. {stock}")
-        print("=" * 60)
-        print(f"\n总计: {len(stocks)} 只股票")
+        # Print to console
+        for index_name, stocks in all_stock_lists.items():
+            print(f"\n{index_name.upper()} Stock List ({len(stocks)} stocks):")
+            print("=" * 60)
+            for i, stock in enumerate(sorted(stocks), 1):
+                print(f"{i:4d}. {stock}")
+            print("=" * 60)
+
+        # Print combined list if multiple indices
+        if len(all_stock_lists) > 1:
+            combined_stocks = combine_stock_lists(all_stock_lists)
+            print(f"\nCombined Stock List ({len(combined_stocks)} unique stocks):")
+            print("=" * 60)
+            for i, stock in enumerate(combined_stocks, 1):
+                print(f"{i:4d}. {stock}")
+            print("=" * 60)
 
 
 if __name__ == "__main__":

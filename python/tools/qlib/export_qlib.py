@@ -575,12 +575,6 @@ def export_qlib_data(
             
             if success:
                 exported_count += 1
-                
-                # Cleanup CSV if requested (keep only last row)
-                if cleanup_csv:
-                    qlib_code = convert_ts_code_to_qlib_format(ts_code)
-                    csv_file = csv_dir / f"{qlib_code}.csv"
-                    cleanup_csv_file(csv_file)
             else:
                 # Check if this is a same-day incremental export with no data (not a real failure)
                 if incremental and stock_start_date and end_date and stock_start_date.date() == end_date.date():
@@ -600,10 +594,26 @@ def export_qlib_data(
         return False
     
     # Convert CSV to Qlib bin format (only for exported stocks)
+    # IMPORTANT: Convert BEFORE cleaning up CSV files, otherwise only last row will be converted
     qlib_output_dir = qlib_dir / "qlib_data" / "cn_data"
     if not convert_csv_to_qlib_bin(csv_dir, qlib_output_dir, qlib_freq, ts_codes=ts_codes):
         logger.error("Failed to convert CSV to Qlib bin format")
         return False
+    
+    # Cleanup CSV files AFTER conversion (keep only last row for incremental export)
+    if cleanup_csv:
+        logger.info("Cleaning up CSV files (keeping only last row for incremental export)...")
+        cleanup_count = 0
+        for ts_code in ts_codes:
+            try:
+                qlib_code = convert_ts_code_to_qlib_format(ts_code)
+                csv_file = csv_dir / f"{qlib_code}.csv"
+                if csv_file.exists():
+                    if cleanup_csv_file(csv_file):
+                        cleanup_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to cleanup CSV for {ts_code}: {e}")
+        logger.info(f"Cleaned up {cleanup_count} CSV files")
     
     logger.info("=" * 80)
     logger.info("Export completed successfully!")
