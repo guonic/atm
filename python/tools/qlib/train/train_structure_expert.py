@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 import qlib
 import torch
@@ -215,6 +216,16 @@ def train_rolling(
                 logger.warning(f"No data for {train_date_str}, skipping")
                 continue
 
+            # Clean NaN values in features
+            # Fill NaN with 0 (or forward fill if preferred)
+            nan_count_before = df_x.isna().sum().sum()
+            if nan_count_before > 0:
+                logger.debug(f"Day {train_date_str}: Found {nan_count_before} NaN values in features, filling with 0")
+                # Fill NaN with 0 (safer than forward fill for cross-sectional data)
+                df_x = df_x.fillna(0.0)
+                # Also replace Inf with 0
+                df_x = df_x.replace([np.inf, -np.inf], 0.0)
+
             # Align df_x and df_y indices if df_y is provided
             if df_y is not None and not df_y.empty:
                 # Find common indices between df_x and df_y
@@ -229,6 +240,15 @@ def train_rolling(
                 df_x_aligned = df_x.loc[common_idx]
                 df_y_aligned = df_y.loc[common_idx]
                 
+                # Clean NaN in aligned data
+                if df_x_aligned.isna().any().any():
+                    logger.debug(f"Day {train_date_str}: Cleaning NaN in aligned features")
+                    df_x_aligned = df_x_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+                
+                if df_y_aligned is not None and df_y_aligned.isna().any().any():
+                    logger.debug(f"Day {train_date_str}: Cleaning NaN in aligned labels")
+                    df_y_aligned = df_y_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+                
                 if df_x_aligned.empty:
                     logger.warning(f"No aligned data for {train_date_str}, skipping")
                     continue
@@ -237,6 +257,11 @@ def train_rolling(
                 df_x_aligned = df_x
                 df_y_aligned = None
                 logger.debug(f"No labels available for {train_date_str}, using features only")
+                
+                # Ensure df_x_aligned is clean
+                if df_x_aligned.isna().any().any():
+                    logger.debug(f"Day {train_date_str}: Cleaning NaN in features (no labels)")
+                    df_x_aligned = df_x_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
 
             # Build graph for this date
             daily_graph = builder.get_daily_graph(df_x_aligned, df_y_aligned)
@@ -248,15 +273,37 @@ def train_rolling(
 
             # Train on this day's graph
             loss = trainer.train_step(daily_graph)
-            total_loss += loss
-            trained_days += 1
+            
+            # Check if loss is valid (not NaN)
+            if loss is not None and not (isinstance(loss, float) and (loss != loss or loss == float('inf'))):
+                # loss is valid (not NaN or Inf)
+                total_loss += loss
+                trained_days += 1
+                logger.debug(f"Day {train_date_str}: Loss = {loss:.6f}")
+            else:
+                # loss is NaN or Inf
+                logger.warning(f"Day {train_date_str}: Loss is NaN/Inf, skipping from average")
 
-            if (idx + 1) % 10 == 0:
-                avg_loss = total_loss / trained_days if trained_days > 0 else 0.0
-                logger.info(
-                    f"Processed {idx + 1}/{len(date_range)} days | "
-                    f"Avg Loss: {avg_loss:.6f} | Last Loss: {loss:.6f}"
-                )
+            # Print progress every 10 days or when no successful training yet
+            if (idx + 1) % 3 == 0 or (trained_days == 0 and (idx + 1) % 5 == 0):
+                if trained_days > 0:
+                    avg_loss = total_loss / trained_days
+                    # Format loss value safely
+                    if loss is not None and isinstance(loss, (int, float)) and not (loss != loss or loss == float('inf')):
+                        loss_str = f"{loss:.6f}"
+                    else:
+                        loss_str = "NaN"
+                    
+                    logger.info(
+                        f"Progress: {idx + 1}/{len(date_range)} days processed | "
+                        f"Successfully trained: {trained_days} days | "
+                        f"Avg Loss: {avg_loss:.6f} | Last Loss: {loss_str}"
+                    )
+                else:
+                    logger.warning(
+                        f"Progress: {idx + 1}/{len(date_range)} days processed | "
+                        f"No successful training yet (all days failed or skipped)"
+                    )
 
         except Exception as e:
             logger.warning(f"Failed to train on {train_date_str}: {e}")

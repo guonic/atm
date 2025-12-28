@@ -12,6 +12,7 @@ Classes:
     StructureTrainer: Training manager for the structure expert model.
 """
 
+import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -21,6 +22,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import GATv2Conv
+
+logger = logging.getLogger(__name__)
 
 
 class StructureExpertGNN(nn.Module):
@@ -118,11 +121,38 @@ class GraphDataBuilder:
                 - edge_index: Edge index tensor connecting stocks in same industry.
                 - symbols: List of stock symbols.
         """
+        # Clean NaN and Inf values before converting to tensor
+        if df_x.isna().any().any():
+            logger.warning(f"Found NaN in df_x, filling with 0")
+            df_x = df_x.fillna(0.0)
+        if (df_x == np.inf).any().any() or (df_x == -np.inf).any().any():
+            logger.warning(f"Found Inf in df_x, replacing with 0")
+            df_x = df_x.replace([np.inf, -np.inf], 0.0)
+        
         stock_list = df_x.index.get_level_values("instrument").tolist()
         x = torch.tensor(df_x.values, dtype=torch.float)
+        
+        # Check for NaN/Inf in tensor (should not happen after cleaning, but double check)
+        if torch.isnan(x).any() or torch.isinf(x).any():
+            logger.warning("Found NaN/Inf in tensor after conversion, replacing with 0")
+            x = torch.where(torch.isnan(x) | torch.isinf(x), torch.zeros_like(x), x)
+        
         y = None
         if df_y is not None:
+            # Clean labels
+            if df_y.isna().any().any():
+                logger.warning(f"Found NaN in df_y, filling with 0")
+                df_y = df_y.fillna(0.0)
+            if (df_y == np.inf).any().any() or (df_y == -np.inf).any().any():
+                logger.warning(f"Found Inf in df_y, replacing with 0")
+                df_y = df_y.replace([np.inf, -np.inf], 0.0)
+            
             y = torch.tensor(df_y.values, dtype=torch.float)
+            
+            # Check for NaN/Inf in y tensor
+            if torch.isnan(y).any() or torch.isinf(y).any():
+                logger.warning("Found NaN/Inf in y tensor after conversion, replacing with 0")
+                y = torch.where(torch.isnan(y) | torch.isinf(y), torch.zeros_like(y), y)
 
         # Build edges: connect stocks in the same industry pairwise
         edge_index = []
@@ -193,12 +223,29 @@ class StructureTrainer:
         """
         self.model.train()
         data = daily_graph.to(self.device)
+        
+        # Check for NaN in input data
+        if torch.isnan(data.x).any():
+            logger.warning("Input features contain NaN, skipping this step")
+            return float('nan')
+        
         self.optimizer.zero_grad()
         pred, embedding = self.model(data.x, data.edge_index)
+        
+        # Check for NaN in predictions
+        if torch.isnan(pred).any() or torch.isinf(pred).any():
+            logger.warning("Model predictions contain NaN/Inf, skipping this step")
+            return float('nan')
         
         # Check if labels are available and have correct size
         if data.y is not None:
             y = data.y
+            
+            # Check for NaN in labels
+            if torch.isnan(y).any() or torch.isinf(y).any():
+                logger.warning("Labels contain NaN/Inf, skipping this step")
+                return float('nan')
+            
             # Ensure y has the same size as pred
             if y.shape[0] != pred.shape[0]:
                 # Size mismatch, skip this step
@@ -220,7 +267,24 @@ class StructureTrainer:
             # No labels, use a dummy loss (e.g., L2 regularization on outputs)
             loss = torch.mean(pred**2)
         
+        # Check for NaN/Inf in loss
+        if torch.isnan(loss) or torch.isinf(loss):
+            logger.warning("Loss is NaN/Inf, skipping this step")
+            return float('nan')
+        
         loss.backward()
+        
+        # Gradient clipping to prevent gradient explosion
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        
+        # Check for NaN in gradients
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    logger.warning(f"Gradient for {name} contains NaN/Inf, skipping this step")
+                    self.optimizer.zero_grad()  # Clear gradients
+                    return float('nan')
+        
         self.optimizer.step()
         return loss.item()
 
