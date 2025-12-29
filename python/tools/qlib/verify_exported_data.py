@@ -275,7 +275,7 @@ class QlibDataVerifier:
             logger.info("  💡 This usually means CSV files haven't been converted to bin format yet.")
             logger.info("  💡 To fix this, run the export tool to convert CSV to bin:")
             logger.info("")
-            logger.info("     python python/tools/qlib/export_single_stock.py sh.000001")
+            logger.info("     python python/tools/qlib/export_qlib.py --freq day --stocks sh.000001")
             logger.info("     # or")
             logger.info("     python python/tools/qlib/export_qlib.py --freq day")
             logger.info("")

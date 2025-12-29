@@ -160,10 +160,15 @@ class GraphDataBuilder:
         ind_to_nodes: Dict[int, List[int]] = {}
         for idx, symbol in enumerate(stock_list):
             ind = self.industry_map.get(symbol, -1)
+            # If stock is not in industry_map, assign a default industry ID (-1)
+            # Stocks with -1 will not be connected to any other stocks
+            # This allows the model to process all stocks, even if they don't have industry mapping
             if ind != -1:
                 if ind not in ind_to_nodes:
                     ind_to_nodes[ind] = []
                 ind_to_nodes[ind].append(idx)
+            # Note: Stocks with ind == -1 are not added to ind_to_nodes,
+            # so they won't have edges, but they will still be included in the graph
 
         for nodes in ind_to_nodes.values():
             for i in nodes:
