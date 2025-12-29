@@ -277,7 +277,7 @@ class QlibDataVerifier:
             logger.info("")
             logger.info("     python python/tools/qlib/export_single_stock.py sh.000001")
             logger.info("     # or")
-            logger.info("     python python/tests/qlib/export_to_qlib.py")
+            logger.info("     python python/tools/qlib/export_qlib.py --freq day")
             logger.info("")
             logger.info("  ⚠ IMPORTANT: CSV files MUST include 'factor' field (7 columns:")
             logger.info("     date,open,high,low,close,volume,factor")

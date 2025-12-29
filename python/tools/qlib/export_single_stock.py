@@ -42,23 +42,42 @@ logger = logging.getLogger(__name__)
 
 def convert_ts_code_to_qlib_format(ts_code: str) -> str:
     """
-    Convert ts_code to Qlib format.
-
+    Convert ts_code to Qlib format, keeping exchange suffix.
+    
+    This function ensures the code format is consistent with the data.
+    Qlib code format: '000001.SZ', '600000.SH' (with exchange suffix).
+    The returned code must match what dump_bin will extract from the CSV filename.
+    
     Args:
-        ts_code: Stock code in format like '000001.SZ' or '600000.SH' or 'sh.000001'
+        ts_code: Stock code in format like '000001.SZ', '600000.SH', 'sh.000001', or 'sz.000001'
 
     Returns:
-        Qlib format code like '000001' or '600000'
+        Qlib format code (e.g., '000001.SZ', '600000.SH') - consistent with data format
     """
-    # Handle different formats: '000001.SZ', '600000.SH', 'sh.000001', 'sz.000001'
+    # Handle different input formats and normalize to '000001.SZ' format
     if "." in ts_code:
         parts = ts_code.split(".")
-        # If format is 'sh.000001' or 'sz.000001', return the code part
-        if len(parts) == 2 and parts[0].lower() in ["sh", "sz", "bj"]:
-            return parts[1]
-        # If format is '000001.SZ' or '600000.SH', return the code part
-        return parts[0]
-    return ts_code
+        if len(parts) == 2:
+            # If format is 'sh.000001' or 'sz.000001', convert to '000001.SH' or '000001.SZ'
+            if parts[0].lower() in ["sh", "sz", "bj"]:
+                exchange = parts[0].upper()
+                if exchange == "SH":
+                    return f"{parts[1]}.SH"
+                elif exchange == "SZ":
+                    return f"{parts[1]}.SZ"
+                elif exchange == "BJ":
+                    return f"{parts[1]}.BJ"
+            # If format is '000001.SZ' or '600000.SH', keep as is
+            return ts_code.upper()
+    # If no dot, assume it's a pure code and try to determine exchange
+    # For codes starting with 6, assume SH; for others starting with 0/3, assume SZ
+    if ts_code.startswith("6"):
+        return f"{ts_code}.SH"
+    elif ts_code.startswith(("0", "3")):
+        return f"{ts_code}.SZ"
+    else:
+        # Default to SZ if cannot determine
+        return f"{ts_code}.SZ"
 
 
 def export_stock_to_csv(
@@ -188,10 +207,12 @@ def export_stock_to_csv(
         # Sort by date
         qlib_df = qlib_df.sort_values("date")
 
-        # Convert ts_code to Qlib format
+        # Convert ts_code to Qlib format (ensure consistency with data)
+        # The code format must match what dump_bin will extract from filename
         qlib_code = convert_ts_code_to_qlib_format(ts_code)
 
         # Save to CSV (ensure column order: date, open, high, low, close, volume, factor)
+        # CSV filename uses Qlib format code to ensure consistency with dump_bin extraction
         csv_file = output_dir / f"{qlib_code}.csv"
         # Reorder columns to ensure correct format
         column_order = ["date", "open", "high", "low", "close", "volume", "factor"]
