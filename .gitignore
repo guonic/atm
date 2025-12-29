@@ -118,3 +118,9 @@ outputs/
 # qlib test data
 python/tests/qlib/Users/
 python/tests/qlib/mlruns/
+
+# models
+models/
+
+# mlruns
+mlruns/
