@@ -42,6 +42,8 @@ if str(tools_qlib_dir) not in sys.path:
 
 import dump_bin
 DumpDataAll = dump_bin.DumpDataAll
+DumpDataFix = dump_bin.DumpDataFix
+DumpDataUpdate = dump_bin.DumpDataUpdate
 
 # Setup logging
 logging.basicConfig(
@@ -407,15 +409,35 @@ def convert_csv_to_qlib_bin(csv_dir: Path, qlib_dir: Path, freq: str, ts_codes: 
             # Use original directory (all files or already filtered)
             data_path = str(csv_dir)
         
-        dumper = DumpDataAll(
-            data_path=data_path,
-            qlib_dir=str(qlib_dir),
-            freq=freq,
-            max_workers=4,
-            date_field_name="date",
-            file_suffix=".csv",
-            include_fields="open,close,high,low,volume,factor",
-        )
+        # Check if qlib data already exists for incremental update
+        calendar_file = qlib_dir / "calendars" / f"{freq}.txt"
+        instruments_file = qlib_dir / "instruments" / "all.txt"
+        
+        if calendar_file.exists() and instruments_file.exists():
+            # Use DumpDataFix for incremental update (preserves existing calendar and instruments)
+            logger.info("Existing Qlib data found, using incremental update mode...")
+            logger.info("This will preserve existing calendar and instruments, only add/update new stock data")
+            dumper = DumpDataFix(
+                data_path=data_path,
+                qlib_dir=str(qlib_dir),
+                freq=freq,
+                max_workers=4,
+                date_field_name="date",
+                file_suffix=".csv",
+                include_fields="open,close,high,low,volume,factor",
+            )
+        else:
+            # First time export, use DumpDataAll
+            logger.info("No existing Qlib data found, using full export mode...")
+            dumper = DumpDataAll(
+                data_path=data_path,
+                qlib_dir=str(qlib_dir),
+                freq=freq,
+                max_workers=4,
+                date_field_name="date",
+                file_suffix=".csv",
+                include_fields="open,close,high,low,volume,factor",
+            )
         
         logger.info("Starting conversion...")
         dumper.dump()

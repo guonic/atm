@@ -376,5 +376,5 @@ python python/tools/qlib/verify_exported_data.py
 - [OFFICIAL_TOOLS.md](./OFFICIAL_TOOLS.md) - 官方工具使用方法
 - [README.md](./README.md) - Qlib 数据导出工具说明
 - [export_qlib.py](../tools/qlib/export_qlib.py) - 数据导出工具实现（主入口）
-- [export_single_stock.py](../tools/qlib/export_single_stock.py) - 单股票导出工具
+- [export_qlib.py](../tools/qlib/export_qlib.py) - 股票数据导出工具（支持单股票或多股票导出，使用 `--stocks` 参数）
 
