@@ -249,12 +249,29 @@ class DumpDataBase:
 
     @staticmethod
     def _read_calendars(calendar_path: Path) -> List[pd.Timestamp]:
-        return sorted(
-            map(
-                pd.Timestamp,
-                pd.read_csv(calendar_path, header=None).loc[:, 0].tolist(),
-            )
-        )
+        """
+        Read calendar file and convert dates to pd.Timestamp.
+        
+        Supports both YYYYMMDD format (Qlib standard) and YYYY-MM-DD format.
+        """
+        dates = pd.read_csv(calendar_path, header=None).loc[:, 0].tolist()
+        timestamps = []
+        for date_str in dates:
+            date_str = str(date_str).strip()
+            # Try YYYYMMDD format first (Qlib standard)
+            if len(date_str) == 8 and date_str.isdigit():
+                try:
+                    timestamps.append(pd.to_datetime(date_str, format='%Y%m%d'))
+                    continue
+                except:
+                    pass
+            # Try YYYY-MM-DD format
+            try:
+                timestamps.append(pd.to_datetime(date_str))
+            except:
+                # Fallback to pd.Timestamp (may cause issues with YYYYMMDD format)
+                timestamps.append(pd.Timestamp(date_str))
+        return sorted(timestamps)
 
     def _read_instruments(self, instrument_path: Path) -> pd.DataFrame:
         df = pd.read_csv(
