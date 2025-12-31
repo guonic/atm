@@ -13,6 +13,7 @@ Classes:
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -313,6 +314,59 @@ class StructureTrainer:
 # Constants for demo
 N_STOCKS = 100
 N_FEATURES = 158  # Qlib Alpha158 dimension
+
+
+def load_structure_expert_model(
+    model_path: str,
+    n_feat: int = 158,
+    n_hidden: int = 128,
+    n_heads: int = 8,
+    device: str = "cuda",
+) -> StructureExpertGNN:
+    """
+    Load trained Structure Expert model from checkpoint file.
+
+    This function loads a trained Structure Expert GNN model from a PyTorch checkpoint
+    file (.pth) and sets it to evaluation mode for inference.
+
+    Args:
+        model_path: Path to model checkpoint file (.pth).
+        n_feat: Number of input features (default: 158 for Alpha158).
+        n_hidden: Hidden layer size (default: 128).
+        n_heads: Number of attention heads (default: 8).
+        device: Device to load model on ('cuda' or 'cpu', default: 'cuda').
+
+    Returns:
+        Loaded StructureExpertGNN model in evaluation mode.
+
+    Raises:
+        FileNotFoundError: If model file does not exist.
+
+    Examples:
+        >>> model = load_structure_expert_model("models/structure_expert.pth")
+        >>> model.eval()  # Already in eval mode
+    """
+    model_path = Path(model_path)
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+
+    logger.info(f"Loading Structure Expert model from {model_path}")
+    logger.info(f"Model parameters: n_feat={n_feat}, n_hidden={n_hidden}, n_heads={n_heads}")
+
+    # Initialize model
+    model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=n_heads)
+
+    # Load weights
+    state_dict = torch.load(model_path, map_location=device)
+    model.load_state_dict(state_dict)
+
+    # Move to device and set to eval mode (inference only, no training)
+    device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
+    model = model.to(device_obj)
+    model.eval()  # Set to evaluation mode - no gradient computation, no training
+
+    logger.info(f"Model loaded successfully on {device_obj} (evaluation mode - inference only)")
+    return model
 
 
 def main() -> None:

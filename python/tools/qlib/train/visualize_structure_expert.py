@@ -32,12 +32,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from nq.config import DatabaseConfig, load_config
 from nq.repo.stock_repo import StockIndustryMemberRepo
 
-# Import structure expert model
-tools_train_dir = Path(__file__).parent
-if str(tools_train_dir) not in sys.path:
-    sys.path.insert(0, str(tools_train_dir))
-
-from structure_expert import GraphDataBuilder, StructureExpertGNN, StructureTrainer
+# Import structure expert model using standard package import
+from tools.qlib.train.structure_expert import GraphDataBuilder, StructureExpertGNN, StructureTrainer
 
 
 def load_industry_map(
@@ -81,17 +77,31 @@ def load_industry_map(
     industry_codes = sorted(set(row[1] for row in rows))
     industry_id_map = {code: idx for idx, code in enumerate(industry_codes)}
 
+    # Create stock_code -> industry_id mapping
+    # Store multiple format variants for robust matching (Qlib may use lowercase)
     industry_map = {}
     for ts_code, l3_code in rows:
-        # Qlib uses same format as Tushare
-        industry_map[ts_code] = industry_id_map[l3_code]
+        # Convert ts_code to Qlib format
+        qlib_code = convert_ts_code_to_qlib_format(ts_code)
+        industry_id = industry_id_map[l3_code]
+        # Store standard format (uppercase)
+        if qlib_code:
+            industry_map[qlib_code] = industry_id
+            # Also store lowercase variant for Qlib compatibility
+            industry_map[qlib_code.lower()] = industry_id
+        # Also store original format variants for robust matching
+        industry_map[ts_code] = industry_id
+        industry_map[ts_code.upper()] = industry_id
+        industry_map[ts_code.lower()] = industry_id
 
     return industry_map
 
 
-def convert_ts_code_to_qlib_format(ts_code: str) -> str:
-    """Convert ts_code to Qlib format."""
-    return ts_code
+# Import unified data normalization
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from nq.utils.data_normalize import normalize_stock_code as convert_ts_code_to_qlib_format
 
 
 @st.cache_data

@@ -68,43 +68,8 @@ FREQ_MAPPING = {
 }
 
 
-def convert_ts_code_to_qlib_format(ts_code: str) -> str:
-    """
-    Convert ts_code to Qlib format, keeping exchange suffix.
-    
-    This function ensures the code format is consistent with the data.
-    Qlib code format: '000001.SZ', '600000.SH' (with exchange suffix).
-    
-    Args:
-        ts_code: Stock code in format like '000001.SZ', '600000.SH', 'sh.000001', or 'sz.000001'
-    
-    Returns:
-        Qlib format code (e.g., '000001.SZ', '600000.SH') - consistent with data format
-    """
-    # Handle different input formats and normalize to '000001.SZ' format
-    if "." in ts_code:
-        parts = ts_code.split(".")
-        if len(parts) == 2:
-            # If format is 'sh.000001' or 'sz.000001', convert to '000001.SH' or '000001.SZ'
-            if parts[0].lower() in ["sh", "sz", "bj"]:
-                exchange = parts[0].upper()
-                if exchange == "SH":
-                    return f"{parts[1]}.SH"
-                elif exchange == "SZ":
-                    return f"{parts[1]}.SZ"
-                elif exchange == "BJ":
-                    return f"{parts[1]}.BJ"
-            # If format is '000001.SZ' or '600000.SH', keep as is
-            return ts_code.upper()
-    # If no dot, assume it's a pure code and try to determine exchange
-    # For codes starting with 6, assume SH; for others starting with 0/3, assume SZ
-    if ts_code.startswith("6"):
-        return f"{ts_code}.SH"
-    elif ts_code.startswith(("0", "3")):
-        return f"{ts_code}.SZ"
-    else:
-        # Default to SZ if cannot determine
-        return f"{ts_code}.SZ"
+# Import unified data normalization
+from nq.utils.data_normalize import normalize_stock_code as convert_ts_code_to_qlib_format
 
 
 def get_last_export_time(csv_file: Path) -> Optional[datetime]:
