@@ -129,12 +129,23 @@ class DatabaseRepo(BaseRepo):
             with engine.connect() as conn:
                 # Get table columns
                 inspector = inspect(engine)
-                columns = [col["name"] for col in inspector.get_columns(self.table_name, schema=self.schema)]
+                table_columns = inspector.get_columns(self.table_name, schema=self.schema)
+                columns = [col["name"] for col in table_columns]
+                # Get nullable columns (columns that allow NULL)
+                nullable_columns = {col["name"] for col in table_columns if col.get("nullable", True)}
 
-                # Filter data to match table columns and remove None values
+                # Filter data to match table columns
+                # For nullable columns, keep None values (to set NULL in database)
+                # For non-nullable columns, remove None values
                 filtered_data = []
                 for record in data:
-                    filtered_record = {k: v for k, v in record.items() if k in columns and v is not None}
+                    filtered_record = {}
+                    for k, v in record.items():
+                        if k not in columns:
+                            continue
+                        # Keep None values for nullable columns (like out_date)
+                        if v is not None or k in nullable_columns:
+                            filtered_record[k] = v
                     if filtered_record:
                         filtered_data.append(filtered_record)
 
@@ -158,12 +169,16 @@ class DatabaseRepo(BaseRepo):
                 for record in filtered_data:
                     all_keys.update(record.keys())
                 
-                # Second pass: normalize records - only include keys that have non-None values
-                # This ensures SQLAlchemy batch insert works correctly
+                # Second pass: normalize records
+                # For nullable columns, keep None values (to set NULL in database)
+                # For non-nullable columns, remove None values
                 normalized_data = []
                 for record in filtered_data:
-                    # Only include keys that exist in this record and are not None
-                    normalized_record = {k: v for k, v in record.items() if v is not None}
+                    normalized_record = {}
+                    for k, v in record.items():
+                        # Keep None values for nullable columns (like out_date)
+                        if v is not None or k in nullable_columns:
+                            normalized_record[k] = v
                     if normalized_record:
                         normalized_data.append(normalized_record)
                 
@@ -177,18 +192,22 @@ class DatabaseRepo(BaseRepo):
                 # OR: Use the union of all keys, but only include keys that exist in each record
                 
                 # For SQLAlchemy batch insert, we need all records to have the same keys
-                # So we'll use the union of all keys, but only include keys that exist in each record
+                # Get union of all keys across all records
                 final_all_keys = set()
                 for record in normalized_data:
                     final_all_keys.update(record.keys())
                 
-                # Pad all records with missing keys (set to None, but we'll exclude None in SQL)
-                # Actually, SQLAlchemy's execute() with a list of dicts requires all dicts to have the same keys
-                # So we need to ensure all records have the same structure
-                # But if we include None values, SQLAlchemy will try to bind them
-                # Solution: Only include keys that are present in ALL records, OR process in groups
+                # Pad all records with missing keys (set to None for nullable columns)
+                # This ensures all records have the same structure for batch insert
+                # SQLAlchemy will correctly convert None to NULL in the database
+                for record in normalized_data:
+                    for key in final_all_keys:
+                        if key not in record:
+                            # Only pad with None if the column is nullable
+                            if key in nullable_columns:
+                                record[key] = None
                 
-                # Check if all records have the same keys
+                # Check if all records have the same keys (they should now after padding)
                 first_record_keys = set(normalized_data[0].keys())
                 all_same_keys = all(set(r.keys()) == first_record_keys for r in normalized_data)
                 
