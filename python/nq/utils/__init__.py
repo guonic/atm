@@ -1,6 +1,24 @@
 """Utility modules for ATM project."""
 
 from nq.utils.logger import setup_logger
+from nq.utils.data_normalize import (
+    normalize_stock_code,
+    normalize_stock_codes,
+    normalize_ts_code,
+    convert_ts_code_to_qlib_format,
+    extract_code_and_market,
+    is_valid_stock_code,
+    normalize_index_code,
+    normalize_date,
+    normalize_date_for_storage,
+    normalize_industry_code,
+    normalize_qlib_directory_name,
+)
+from nq.utils.industry import (
+    load_industry_label_map,
+    load_industry_map,
+)
+from nq.utils.model import save_embeddings
 
 # OpenTelemetry utilities (optional)
 try:
@@ -33,8 +51,38 @@ try:
         "record_duration",
         "MetricsCounter",
         "MetricsHistogram",
+        "normalize_stock_code",
+        "normalize_stock_codes",
+        "normalize_ts_code",
+        "convert_ts_code_to_qlib_format",
+        "extract_code_and_market",
+        "is_valid_stock_code",
+        "normalize_index_code",
+        "normalize_date",
+        "normalize_date_for_storage",
+        "normalize_industry_code",
+        "normalize_qlib_directory_name",
+        "load_industry_map",
+        "load_industry_label_map",
+        "save_embeddings",
     ]
 except ImportError:
-    __all__ = ["setup_logger"]
+    __all__ = [
+        "setup_logger",
+        "normalize_stock_code",
+        "normalize_stock_codes",
+        "normalize_ts_code",
+        "convert_ts_code_to_qlib_format",
+        "extract_code_and_market",
+        "is_valid_stock_code",
+        "normalize_index_code",
+        "normalize_date",
+        "normalize_date_for_storage",
+        "normalize_industry_code",
+        "normalize_qlib_directory_name",
+        "load_industry_map",
+        "load_industry_label_map",
+        "save_embeddings",
+    ]
 
 

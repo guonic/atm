@@ -15,10 +15,8 @@ from typing import Dict, Optional
 
 import torch
 
-# Add parent directory to path to import structure_expert
-sys.path.insert(0, str(Path(__file__).parent))
-
-from structure_expert import StructureExpertGNN
+# Import structure expert model using standard package import
+from tools.qlib.train.structure_expert import StructureExpertGNN
 
 
 def check_file_exists(model_path: Path) -> bool:

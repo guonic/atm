@@ -16,34 +16,11 @@ from tqdm import tqdm
 from loguru import logger
 from qlib.utils import fname_to_code, code_to_fname
 
-
-def normalize_stock_code(code: str) -> str:
-    """
-    Normalize stock code, keeping exchange suffix if present.
-    
-    This function ensures code format consistency with the data.
-    Qlib code format: '000001.SZ', '600000.SH' (with exchange suffix).
-    
-    Args:
-        code: Stock code in various formats (e.g., '000001.SZ', '600000.SH', '000001', 'sh.000001').
-    
-    Returns:
-        Normalized code in format '000001.SZ' or '600000.SH' (with exchange suffix).
-    """
-    code_str = str(code).strip()
-    
-    # If already has exchange suffix (e.g., '000001.SZ'), keep it
-    if '.' in code_str:
-        parts = code_str.split('.')
-        if len(parts) == 2 and parts[1].upper() in ['SH', 'SZ', 'BJ']:
-            return f"{parts[0]}.{parts[1].upper()}"
-        # If format is 'sh.000001' or 'sz.000001', convert to '000001.SH' or '000001.SZ'
-        if len(parts) == 2 and parts[0].lower() in ['sh', 'sz', 'bj']:
-            exchange = parts[0].upper()
-            return f"{parts[1]}.{exchange}"
-    
-    # Otherwise, use fname_to_code for backward compatibility
-    return fname_to_code(code_str.lower()).upper()
+# Import unified data normalization
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from nq.utils.data_normalize import normalize_stock_code
 
 
 def read_as_df(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:

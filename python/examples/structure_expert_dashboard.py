@@ -40,14 +40,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from nq.config import DatabaseConfig, load_config
 from nq.repo.stock_repo import StockIndustryMemberRepo
+from nq.utils.data_normalize import normalize_stock_code
 from sqlalchemy import text
 
-# Import structure expert model
-tools_train_dir = Path(__file__).parent.parent / "tools" / "qlib" / "train"
-if str(tools_train_dir) not in sys.path:
-    sys.path.insert(0, str(tools_train_dir))
-
-from structure_expert import GraphDataBuilder, StructureExpertGNN
+# Import structure expert model using standard package import
+from tools.qlib.train.structure_expert import GraphDataBuilder, StructureExpertGNN
 
 # Configure logging
 logging.basicConfig(
@@ -92,18 +89,16 @@ def load_industry_label_map(
     table_name = repo._get_full_table_name()
     
     # Query stock codes with L3 industry names
+    # Note: stock_industry_member table already has l3_name field, no need to JOIN
+    # If all records have out_date, use the most recent in_date for each stock
     sql = f"""
-    SELECT DISTINCT 
+    SELECT DISTINCT ON (sim.ts_code)
         sim.ts_code,
-        sic.industry_name as l3_name
+        sim.l3_name
     FROM {table_name} sim
-    LEFT JOIN quant.stock_industry_classify sic 
-        ON sim.l3_code = sic.index_code 
-        AND sic.level = 'L3'
-        AND sic.src = 'SW2021'
-    WHERE (sim.out_date IS NULL OR sim.out_date > :target_date)
-      AND sim.in_date <= :target_date
-    ORDER BY sim.ts_code
+    WHERE sim.in_date <= :target_date
+      AND (sim.out_date IS NULL OR sim.out_date > :target_date)
+    ORDER BY sim.ts_code, sim.in_date DESC
     """
     
     try:
@@ -114,23 +109,40 @@ def load_industry_label_map(
             )
             rows = result.fetchall()
         
-        # Convert to Qlib format
+        # If no results, try without out_date filter (use latest in_date for each stock)
+        if not rows:
+            logger.warning(f"No industry labels found with date filter, trying latest records...")
+            sql_latest = f"""
+            SELECT DISTINCT ON (sim.ts_code)
+                sim.ts_code,
+                sim.l3_name
+            FROM {table_name} sim
+            ORDER BY sim.ts_code, sim.in_date DESC
+            """
+            result = conn.execute(text(sql_latest))
+            rows = result.fetchall()
+            if rows:
+                logger.info(f"Found {len(rows)} industry labels using latest records")
+        
+        # Convert to standard format (already normalized)
         label_map = {}
         for ts_code, l3_name in rows:
-            qlib_code = convert_ts_code_to_qlib_format(ts_code)
-            label_map[qlib_code] = l3_name if l3_name else "Unknown"
+            normalized_code = normalize_stock_code(ts_code)
+            industry_name = l3_name if l3_name else "Unknown"
+            # Store normalized code (standard format is uppercase)
+            label_map[normalized_code] = industry_name
         
-        logger.info(f"Loaded industry labels: {len(label_map)} stocks")
+        logger.info(f"Loaded industry labels: {len(rows)} stocks (with case variants: {len(label_map)} entries)")
+        if len(label_map) == 0:
+            logger.warning("No industry labels loaded! Check database connection and data availability.")
         return label_map
     except Exception as e:
         logger.error(f"Failed to load industry labels: {e}")
         return {}
 
 
-def convert_ts_code_to_qlib_format(ts_code: str) -> str:
-    """Convert ts_code to Qlib format."""
-    # Qlib uses same format: 000001.SZ -> 000001.SZ
-    return ts_code
+# Use unified stock code normalization
+convert_ts_code_to_qlib_format = normalize_stock_code
 
 
 def load_model(
@@ -190,6 +202,7 @@ def visualize_structure_expert(
     scores: np.ndarray,
     symbols: List[str],
     industry_label_map: Optional[Dict[str, str]] = None,
+    industry_labels: Optional[List[str]] = None,
     title: str = "Structure Expert Visualization (t-SNE)",
 ) -> go.Figure:
     """
@@ -207,16 +220,32 @@ def visualize_structure_expert(
     """
     # Run t-SNE
     logger.info("Running t-SNE... (this may take a minute)")
-    tsne = TSNE(n_components=2, perplexity=30, n_iter=1000, random_state=42)
+    # Use max_iter for newer scikit-learn versions, fallback to n_iter for older versions
+    try:
+        tsne = TSNE(n_components=2, perplexity=30, max_iter=1000, random_state=42)
+    except TypeError:
+        # Fallback for older scikit-learn versions
+        tsne = TSNE(n_components=2, perplexity=30, n_iter=1000, random_state=42)
     components = tsne.fit_transform(embeddings)
     
-    # Prepare data
+    # Use provided industry_labels if available, otherwise generate from industry_label_map
+    if industry_labels is None:
+        industry_labels = []
+        if industry_label_map:
+            # Normalize symbols to standard format for matching
+            for s in symbols:
+                normalized_s = normalize_stock_code(s)
+                label = industry_label_map.get(normalized_s, "Unknown")
+                industry_labels.append(label)
+        else:
+            industry_labels = ["Unknown"] * len(symbols)
+    
     df_vis = pd.DataFrame({
         'x': components[:, 0],
         'y': components[:, 1],
         'symbol': symbols,
         'score': scores,
-        'industry': [industry_label_map.get(s, "Unknown") if industry_label_map else "Unknown" for s in symbols],
+        'industry': industry_labels,
     })
     
     # Create interactive scatter plot
@@ -395,12 +424,43 @@ def main_streamlit():
                         embedding_cols = [col for col in cached_data.columns if col.startswith('embedding_')]
                         embeddings = cached_data[embedding_cols].values
                         
+                        # Check if industry column exists and has valid data
+                        use_cached_industry = False
+                        if 'industry' in cached_data.columns:
+                            # Check if all industries are "Unknown"
+                            unique_industries = cached_data['industry'].unique()
+                            if len(unique_industries) > 1 or (len(unique_industries) == 1 and unique_industries[0] != "Unknown"):
+                                use_cached_industry = True
+                                st.info(f"Using industry labels from cached data ({len(unique_industries)} unique industries)")
+                        
+                        # If cached industry is all "Unknown", use database labels
+                        if not use_cached_industry and industry_label_map:
+                            st.info("Cached industry labels are all 'Unknown', using database labels instead")
+                            # Create industry mapping from database (using standard format)
+                            industry_dict = {}
+                            for s in symbols:
+                                normalized_s = normalize_stock_code(s)
+                                label = industry_label_map.get(normalized_s, "Unknown")
+                                industry_dict[s] = label
+                            
+                            # Update cached_data with new industry labels
+                            cached_data['industry'] = cached_data['symbol'].map(industry_dict).fillna("Unknown")
+                            # Save updated data back to file
+                            date_str = selected_date.strftime("%Y%m%d")
+                            output_path = STORAGE_DIR / f"embeddings_{date_str}.parquet"
+                            cached_data.to_parquet(output_path, index=False)
+                            st.success(f"Updated industry labels and saved to {output_path.name}")
+                        
+                        # Use industry from cached_data (either original or updated)
+                        industry_labels = cached_data['industry'].tolist() if 'industry' in cached_data.columns else None
+                        
                         # Create visualization
                         fig = visualize_structure_expert(
                             embeddings=embeddings,
                             scores=scores,
                             symbols=symbols,
-                            industry_label_map=industry_label_map,
+                            industry_label_map=industry_label_map if not use_cached_industry else None,
+                            industry_labels=industry_labels,
                             title=f"Structure Expert Visualization - {selected_date}",
                         )
                         st.plotly_chart(fig, use_container_width=True)

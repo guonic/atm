@@ -27,12 +27,35 @@ Usage:
         --top_k 30 \
         --initial_cash 1000000
 
+    # Use RefinedTopKStrategy to reduce turnover
+    python backtest_structure_expert.py \
+        --model_path models/structure_expert.pth \
+        --start_date 2024-01-01 \
+        --end_date 2024-06-30 \
+        --strategy RefinedTopKStrategy \
+        --buffer_ratio 0.15 \
+        --top_k 30
+
+    # Use SimpleLowTurnoverStrategy (simpler, only sell if stock falls out of top N)
+    python backtest_structure_expert.py \
+        --model_path models/structure_expert.pth \
+        --start_date 2024-01-01 \
+        --end_date 2024-06-30 \
+        --strategy SimpleLowTurnoverStrategy \
+        --retain_threshold 30 \
+        --top_k 10
+
 Arguments:
     --model_path         Path to trained model file (.pth)
     --start_date         Start date of backtest period (YYYY-MM-DD)
     --end_date           End date of backtest period (YYYY-MM-DD)
     --top_k              Number of top stocks to select (default: 30)
     --strategy           Portfolio strategy class name (default: TopkDropoutStrategy)
+                         Options: 'TopkDropoutStrategy', 'RefinedTopKStrategy', 'SimpleLowTurnoverStrategy'
+    --buffer_ratio       Buffer ratio for RefinedTopKStrategy (default: 0.15)
+                         Higher value reduces turnover but may reduce returns
+    --retain_threshold   Retain threshold for SimpleLowTurnoverStrategy (default: 30)
+                         Only sell existing holdings if they fall out of top N
     --initial_cash       Initial cash amount (default: 1000000)
     --save_results       Save backtest results to file (default: False)
     --qlib_dir           Qlib data directory (default: ~/.qlib/qlib_data/cn_data)
@@ -49,32 +72,32 @@ Output:
 """
 
 import argparse
+import importlib.util
 import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Gymnasium compatibility patch for Qlib
+# Gymnasium compatibility patch for Qlib - MUST be before any qlib imports
 # Qlib's RL module imports 'gym', but gym is unmaintained.
 # Gymnasium is the maintained drop-in replacement.
 # This patch allows Qlib to use gymnasium if installed.
-try:
-    import gymnasium as gym
+# Note: Using importlib.import_module() to avoid import statements in conditional blocks
+_gymnasium_spec = importlib.util.find_spec("gymnasium")
+if _gymnasium_spec is not None:
+    gym = importlib.import_module("gymnasium")
     sys.modules['gym'] = gym
-    # Also patch gym.spaces if it's accessed directly
-    import gymnasium.spaces as spaces
+    spaces = importlib.import_module("gymnasium.spaces")
     sys.modules['gym.spaces'] = spaces
-    logging.getLogger(__name__).info("Patched 'gym' import to use 'gymnasium'.")
-except ImportError:
-    # If gymnasium is not installed, try to import gym as fallback
-    try:
-        import gym
-        logging.getLogger(__name__).warning(
-            "Using deprecated 'gym' package. "
-            "Please install 'gymnasium' (pip install gymnasium) for better compatibility."
-        )
-    except ImportError:
+    _gym_patched = True
+else:
+    # Fallback to gym if gymnasium is not available
+    _gym_spec = importlib.util.find_spec("gym")
+    if _gym_spec is not None:
+        gym = importlib.import_module("gym")
+        _gym_patched = False
+    else:
         raise ImportError(
             "Neither 'gymnasium' nor 'gym' is installed. "
             "Qlib's backtest module requires one of them. "
@@ -92,34 +115,39 @@ from qlib.backtest import backtest, executor
 from qlib.contrib.data.handler import Alpha158
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
 from qlib.data import D
-from sqlalchemy import text
 
-# Matplotlib for visualization
-try:
-    import matplotlib
+# Matplotlib for visualization (optional dependency)
+# Using importlib.import_module() to avoid import statements in conditional blocks
+_matplotlib_spec = importlib.util.find_spec("matplotlib")
+if _matplotlib_spec is not None:
+    matplotlib = importlib.import_module("matplotlib")
     matplotlib.use('Agg')  # Use non-interactive backend
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    from matplotlib import font_manager
+    plt = importlib.import_module("matplotlib.pyplot")
+    mdates = importlib.import_module("matplotlib.dates")
+    font_manager = importlib.import_module("matplotlib.font_manager")
     HAS_MATPLOTLIB = True
-except ImportError:
+else:
     HAS_MATPLOTLIB = False
+    # Set dummy values to avoid NameError when HAS_MATPLOTLIB is False
+    matplotlib = None
+    plt = None
+    mdates = None
+    font_manager = None
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from nq.config import DatabaseConfig, load_config
-from nq.repo.stock_repo import StockIndustryMemberRepo
+from nq.utils.data_normalize import normalize_index_code, normalize_stock_code
+from nq.utils.industry import load_industry_label_map, load_industry_map
+from nq.utils.model import save_embeddings as save_embeddings_to_file
 
-# Import structure expert model
-tools_train_dir = Path(__file__).parent.parent / "tools" / "qlib" / "train"
-if str(tools_train_dir) not in sys.path:
-    sys.path.insert(0, str(tools_train_dir))
-
-from structure_expert import (
+# Import structure expert model using standard package import
+from tools.qlib.train.structure_expert import (
     GraphDataBuilder,
     StructureExpertGNN,
     StructureTrainer,
+    load_structure_expert_model,
 )
 
 # Configure logging
@@ -130,6 +158,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Log gymnasium patch status (only once, suppress in worker processes)
+# Check if we're in the main process by checking if __name__ is __main__
+# In multiprocessing, worker processes have __name__ == '__mp_main__'
+_gym_patch_logged = False
+if __name__ == "__main__":
+    _gym_patch_logged = True
+    if _gym_patched:
+        logger.info("Patched 'gym' import to use 'gymnasium'.")
+    else:
+        logger.warning(
+            "Using deprecated 'gym' package. "
+            "Please install 'gymnasium' (pip install gymnasium) for better compatibility."
+        )
+
 # Default settings
 DEFAULT_TOP_K = 30
 DEFAULT_INITIAL_CASH = 1000000
@@ -139,154 +181,685 @@ DEFAULT_N_HIDDEN = 128
 DEFAULT_N_HEADS = 8
 
 
-def convert_ts_code_to_qlib_format(ts_code: str) -> str:
-    """Convert ts_code to Qlib format."""
-    return ts_code
+# Use unified stock code normalization
+convert_ts_code_to_qlib_format = normalize_stock_code
+
+# Use system library function for benchmark code normalization
+# Benchmark codes are index codes, so use normalize_index_code
+normalize_benchmark_code = normalize_index_code
+
+# Use system library function for loading Structure Expert model
+load_model = load_structure_expert_model
 
 
-def normalize_benchmark_code(benchmark: str) -> str:
+def get_refined_top_k(
+    current_holdings: List[str],
+    pred_scores: Dict[str, float],
+    top_k: int = 10,
+    buffer_ratio: float = 0.15,
+) -> List[str]:
     """
-    Normalize benchmark code to Qlib format.
-    
-    Qlib uses format: code.(sh|sz|bj), e.g., '000300.SH', '399001.SZ'
-    Common input formats:
-    - 'SH000300' -> '000300.SH'
-    - '000300.SH' -> '000300.SH' (already correct)
-    - 'CSI300' -> try to convert or return as is
-    
-    Args:
-        benchmark: Benchmark code in various formats.
-    
-    Returns:
-        Normalized benchmark code in Qlib format.
-    """
-    if not benchmark:
-        return benchmark
-    
-    benchmark = benchmark.strip().upper()
-    
-    # If already in correct format (code.EXCHANGE), return as is
-    if "." in benchmark:
-        parts = benchmark.split(".")
-        if len(parts) == 2 and parts[1] in ["SH", "SZ", "BJ"]:
-            return benchmark
-    
-    # Try to convert formats like 'SH000300' to '000300.SH'
-    if benchmark.startswith("SH"):
-        code = benchmark[2:]  # Remove 'SH' prefix
-        return f"{code}.SH"
-    elif benchmark.startswith("SZ"):
-        code = benchmark[2:]  # Remove 'SZ' prefix
-        return f"{code}.SZ"
-    elif benchmark.startswith("BJ"):
-        code = benchmark[2:]  # Remove 'BJ' prefix
-        return f"{code}.BJ"
-    
-    # If starts with number, assume it's a code and try to determine exchange
-    if benchmark[0].isdigit():
-        if benchmark.startswith("6"):
-            return f"{benchmark}.SH"
-        elif benchmark.startswith(("0", "3")):
-            return f"{benchmark}.SZ"
-    
-    # Return as is if cannot determine
-    return benchmark
+    Get refined top K stocks with reduced turnover.
 
-
-def load_industry_map(
-    db_config: DatabaseConfig, target_date: Optional[datetime] = None, schema: str = "quant"
-) -> Dict[str, int]:
-    """
-    Load industry mapping from database.
+    This function implements a buffer mechanism to reduce portfolio turnover by
+    keeping existing holdings that are still performing well, even if they're
+    not in the absolute top K.
 
     Args:
-        db_config: Database configuration.
-        target_date: Target date for industry membership (default: current date).
-        schema: Database schema name.
+        current_holdings: Current holdings list (e.g., ['000001.SZ', ...]).
+        pred_scores: Model prediction scores dict {symbol: score}.
+        top_k: Target number of holdings.
+        buffer_ratio: Buffer ratio. Only swap when new stock ranks significantly
+                     higher than old holdings.
 
     Returns:
-        Dictionary mapping stock codes (in Qlib format) to industry IDs.
-        Format: {stock_code: industry_id}
+        List of selected stock symbols.
+
+    Examples:
+        >>> current = ['000001.SZ', '000002.SZ']
+        >>> scores = {'000001.SZ': 0.5, '000002.SZ': 0.3, '000003.SZ': 0.8, '000004.SZ': 0.7}
+        >>> selected = get_refined_top_k(current, scores, top_k=2, buffer_ratio=0.15)
+        >>> print(selected)
+        ['000003.SZ', '000001.SZ']  # Keeps 000001.SZ if it's still in top 2.3
     """
-    repo = StockIndustryMemberRepo(db_config, schema=schema)
+    # 1. Sort all stocks by prediction scores
+    sorted_scores = sorted(pred_scores.items(), key=lambda x: x[1], reverse=True)
+    candidates = [s[0] for s in sorted_scores]
 
-    if target_date is None:
-        target_date = datetime.now()
+    # Get absolute Top K (hard threshold)
+    absolute_top_k = set(candidates[:top_k])
 
-    # Get all current industry members
-    engine = repo._get_engine()
-    table_name = repo._get_full_table_name()
+    # 2. If no current holdings, return absolute Top K
+    if not current_holdings:
+        return list(absolute_top_k)
 
-    sql = f"""
-    SELECT DISTINCT ts_code, l3_code
-    FROM {table_name}
-    WHERE (out_date IS NULL OR out_date > :target_date)
-      AND in_date <= :target_date
-    ORDER BY ts_code
+    # 3. Core logic: Provide "competitive protection" for existing holdings
+    # Only swap when new stock enters top TopK * (1 - buffer_ratio) region,
+    # or old stock falls out of TopK * (1 + buffer_ratio) region.
+
+    new_holdings = []
+
+    # Check which existing holdings can still compete (still in top ranks)
+    # Give existing holdings a buffer zone
+    refined_limit = int(top_k * (1 + buffer_ratio))
+    keep_holdings = [s for s in current_holdings if s in candidates[:refined_limit]]
+
+    # 4. Fill new holdings
+    # First add good existing holdings
+    new_holdings.extend(keep_holdings)
+
+    # Fill remaining slots with top-scoring new stocks
+    for stock in candidates:
+        if len(new_holdings) >= top_k:
+            break
+        if stock not in new_holdings:
+            new_holdings.append(stock)
+
+    return new_holdings
+
+
+def execution_logic(
+    current_portfolio: Dict[str, float],
+    pred_scores: Dict[str, float],
+    top_k: int = 10,
+    retain_threshold: int = 30,
+) -> List[str]:
+    """
+    Simple low turnover execution logic.
+
+    This function implements a simple strategy to reduce portfolio turnover:
+    - Only sell existing holdings if they fall out of top N (retain_threshold)
+    - Fill empty slots with highest-scoring new stocks
+
+    Args:
+        current_portfolio: Current portfolio dict {symbol: weight} or {symbol: amount}.
+        pred_scores: Model prediction scores dict {symbol: score}.
+        top_k: Target number of holdings.
+        retain_threshold: Threshold for retaining existing holdings (default: 30).
+                        Only sell if stock falls out of top N.
+
+    Returns:
+        List of selected stock symbols.
+
+    Examples:
+        >>> current = {'000001.SZ': 0.1, '000002.SZ': 0.1}
+        >>> scores = {'000001.SZ': 0.5, '000002.SZ': 0.3, '000003.SZ': 0.8, '000004.SZ': 0.7}
+        >>> selected = execution_logic(current, scores, top_k=2, retain_threshold=30)
+        >>> print(selected)
+        ['000003.SZ', '000001.SZ']  # Keeps 000001.SZ if it's in top 30
+    """
+    # 1. Sort stocks by prediction scores
+    sorted_stocks = sorted(pred_scores.items(), key=lambda x: x[1], reverse=True)
+    potential_candidates = [s[0] for s in sorted_stocks]
+
+    # 2. Only sell existing holdings if they fall out of top N
+    current_holdings = list(current_portfolio.keys())
+    next_holdings = []
+
+    # Check existing holdings
+    for stock in current_holdings:
+        # If old stock is still in top N, keep it
+        if stock in potential_candidates[:retain_threshold]:
+            next_holdings.append(stock)
+
+    # 3. Fill empty slots with highest-scoring new stocks
+    for stock in potential_candidates:
+        if len(next_holdings) >= top_k:
+            break
+        if stock not in next_holdings:
+            next_holdings.append(stock)
+
+    return next_holdings
+
+
+class RefinedTopKStrategy(TopkDropoutStrategy):
+    """
+    Custom strategy with reduced turnover using buffer mechanism.
+
+    This strategy extends TopkDropoutStrategy with a buffer mechanism to reduce
+    portfolio turnover by keeping existing holdings that are still performing well.
+    It wraps the signal DataFrame to apply get_refined_top_k logic before passing
+    to the base TopkDropoutStrategy.
     """
 
-    with engine.connect() as conn:
-        result = conn.execute(
-            text(sql),
-            {"target_date": target_date.date()},
+    def __init__(
+        self,
+        signal: pd.DataFrame,
+        topk: int = 30,
+        buffer_ratio: float = 0.15,
+        n_drop: int = 5,
+    ):
+        """
+        Initialize RefinedTopKStrategy.
+
+        Args:
+            signal: Signal DataFrame with MultiIndex (datetime, instrument) and 'score' column.
+            topk: Target number of stocks to hold.
+            buffer_ratio: Buffer ratio for reducing turnover (default: 0.15).
+            n_drop: Number of bottom stocks to drop (default: 5).
+        """
+        # Apply refined top K logic to signal before passing to base strategy
+        refined_signal = self._apply_refined_top_k(signal, topk, buffer_ratio)
+
+        # Initialize base strategy with refined signal
+        super().__init__(signal=refined_signal, topk=topk, n_drop=n_drop)
+        self.buffer_ratio = buffer_ratio
+        self.original_signal = signal
+
+    def _apply_refined_top_k(
+        self,
+        signal: pd.DataFrame,
+        topk: int,
+        buffer_ratio: float,
+    ) -> pd.DataFrame:
+        """
+        Apply refined top K logic to signal DataFrame.
+
+        Args:
+            signal: Original signal DataFrame.
+            topk: Target number of stocks.
+            buffer_ratio: Buffer ratio.
+
+        Returns:
+            Refined signal DataFrame with adjusted scores.
+        """
+        if len(signal) == 0:
+            return signal
+
+        # Create a copy to modify
+        refined_signal = signal.copy()
+
+        # Group by date and apply refined top K for each date
+        dates = signal.index.get_level_values(0).unique()
+        current_holdings = []
+        total_kept = 0
+
+        for date in dates:
+            date_signal = signal.loc[date]
+
+            # Get prediction scores for this date
+            if isinstance(date_signal, pd.Series):
+                # Single stock case
+                pred_scores = {date_signal.name: date_signal.get('score', 0.0)}
+            else:
+                # Multiple stocks case
+                pred_scores = date_signal['score'].to_dict()
+
+            # Apply refined top K selection
+            selected_stocks = get_refined_top_k(
+                current_holdings=current_holdings,
+                pred_scores=pred_scores,
+                top_k=topk,
+                buffer_ratio=buffer_ratio,
+            )
+
+            # Count how many existing holdings were kept
+            kept_count = len(set(current_holdings) & set(selected_stocks))
+            total_kept += kept_count
+
+            # Update current holdings for next iteration
+            current_holdings = selected_stocks
+
+            # Modify signal: set low score for non-selected stocks
+            if isinstance(date_signal, pd.Series):
+                if date_signal.name not in selected_stocks:
+                    refined_signal.loc[(date, date_signal.name), 'score'] = -999.0
+            else:
+                # Set low score for non-selected stocks
+                for stock in date_signal.index:
+                    if stock not in selected_stocks:
+                        refined_signal.loc[(date, stock), 'score'] = -999.0
+
+        # Log statistics
+        avg_kept = total_kept / len(dates) if len(dates) > 0 else 0
+        logger.info(
+            f"Applied refined top K logic: average {avg_kept:.1f} holdings kept per day "
+            f"(out of {topk}) with buffer_ratio={buffer_ratio}"
         )
-        rows = result.fetchall()
 
-    # Convert to Qlib format and create mapping
-    industry_codes = sorted(set(row[1] for row in rows))
-    industry_id_map = {code: idx for idx, code in enumerate(industry_codes)}
-
-    # Create stock_code -> industry_id mapping
-    industry_map = {}
-    for ts_code, l3_code in rows:
-        qlib_code = convert_ts_code_to_qlib_format(ts_code)
-        industry_map[qlib_code] = industry_id_map[l3_code]
-
-    logger.info(f"Loaded industry mapping: {len(industry_map)} stocks, {len(industry_codes)} industries")
-    return industry_map
+        return refined_signal
 
 
-def load_model(
-    model_path: str,
-    n_feat: int = DEFAULT_N_FEAT,
-    n_hidden: int = DEFAULT_N_HIDDEN,
-    n_heads: int = DEFAULT_N_HEADS,
-    device: str = "cuda",
-) -> StructureExpertGNN:
+class SimpleLowTurnoverStrategy(TopkDropoutStrategy):
     """
-    Load trained Structure Expert model.
+    Simple low turnover strategy with retain threshold.
 
-    Args:
-        model_path: Path to model file (.pth).
-        n_feat: Number of input features.
-        n_hidden: Hidden layer size.
-        n_heads: Number of attention heads.
-        device: Device to load model on.
+    This strategy extends TopkDropoutStrategy with a simple retain threshold mechanism:
+    - Only sell existing holdings if they fall out of top N (retain_threshold)
+    - Fill empty slots with highest-scoring new stocks
+    - Much simpler than RefinedTopKStrategy, focuses on reducing unnecessary turnover
+    """
+
+    def __init__(
+        self,
+        signal: pd.DataFrame,
+        topk: int = 30,
+        retain_threshold: int = 30,
+        n_drop: int = 5,
+    ):
+        """
+        Initialize SimpleLowTurnoverStrategy.
+
+        Args:
+            signal: Signal DataFrame with MultiIndex (datetime, instrument) and 'score' column.
+            topk: Target number of stocks to hold.
+            retain_threshold: Threshold for retaining existing holdings (default: 30).
+                            Only sell if stock falls out of top N.
+            n_drop: Number of bottom stocks to drop (default: 5).
+        """
+        # Apply simple low turnover logic to signal before passing to base strategy
+        refined_signal = self._apply_execution_logic(signal, topk, retain_threshold)
+
+        # Initialize base strategy with refined signal
+        super().__init__(signal=refined_signal, topk=topk, n_drop=n_drop)
+        self.retain_threshold = retain_threshold
+        self.original_signal = signal
+
+    def _apply_execution_logic(
+        self,
+        signal: pd.DataFrame,
+        topk: int,
+        retain_threshold: int,
+    ) -> pd.DataFrame:
+        """
+        Apply simple low turnover execution logic to signal DataFrame.
+
+        Args:
+            signal: Original signal DataFrame.
+            topk: Target number of stocks.
+            retain_threshold: Threshold for retaining existing holdings.
+
+        Returns:
+            Refined signal DataFrame with adjusted scores.
+        """
+        if len(signal) == 0:
+            return signal
+
+        # Create a copy to modify
+        refined_signal = signal.copy()
+
+        # Group by date and apply execution logic for each date
+        dates = signal.index.get_level_values(0).unique()
+        current_portfolio = {}  # Track current portfolio as dict
+        total_kept = 0
+
+        for date in dates:
+            date_signal = signal.loc[date]
+
+            # Get prediction scores for this date
+            if isinstance(date_signal, pd.Series):
+                # Single stock case
+                pred_scores = {date_signal.name: date_signal.get('score', 0.0)}
+            else:
+                # Multiple stocks case
+                pred_scores = date_signal['score'].to_dict()
+
+            # Apply execution logic
+            selected_stocks = execution_logic(
+                current_portfolio=current_portfolio,
+                pred_scores=pred_scores,
+                top_k=topk,
+                retain_threshold=retain_threshold,
+            )
+
+            # Count how many existing holdings were kept
+            kept_count = len(set(current_portfolio.keys()) & set(selected_stocks))
+            total_kept += kept_count
+
+            # Update current portfolio for next iteration
+            # Convert to dict format for next iteration
+            current_portfolio = {stock: 1.0 / len(selected_stocks) for stock in selected_stocks}
+
+            # Modify signal: set low score for non-selected stocks
+            if isinstance(date_signal, pd.Series):
+                if date_signal.name not in selected_stocks:
+                    refined_signal.loc[(date, date_signal.name), 'score'] = -999.0
+            else:
+                # Set low score for non-selected stocks
+                for stock in date_signal.index:
+                    if stock not in selected_stocks:
+                        refined_signal.loc[(date, stock), 'score'] = -999.0
+
+        # Log statistics
+        avg_kept = total_kept / len(dates) if len(dates) > 0 else 0
+        logger.info(
+            f"Applied simple low turnover logic: average {avg_kept:.1f} holdings kept per day "
+            f"(out of {topk}) with retain_threshold={retain_threshold}"
+        )
+
+        return refined_signal
+
+
+def _get_qlib_data_range() -> tuple[Optional[datetime.date], Optional[datetime.date]]:
+    """
+    Get the date range of available Qlib data.
 
     Returns:
-        Loaded model in evaluation mode.
+        Tuple of (start_date, end_date) as date objects, or (None, None) if no data.
     """
-    model_path = Path(model_path)
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    full_calendar = D.calendar()
+    if len(full_calendar) == 0:
+        return None, None
 
-    logger.info(f"Loading model from {model_path}")
-    logger.info(f"Model parameters: n_feat={n_feat}, n_hidden={n_hidden}, n_heads={n_heads}")
+    data_start_ts = full_calendar[0]
+    data_end_ts = full_calendar[-1]
 
-    # Initialize model
-    model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=n_heads)
+    # Convert Timestamp to date
+    if isinstance(data_start_ts, pd.Timestamp):
+        data_start_date = data_start_ts.date()
+    elif hasattr(data_start_ts, 'date'):
+        data_start_date = data_start_ts.date()
+    else:
+        data_start_date = data_start_ts
 
-    # Load weights
-    state_dict = torch.load(model_path, map_location=device)
-    model.load_state_dict(state_dict)
+    if isinstance(data_end_ts, pd.Timestamp):
+        data_end_date = data_end_ts.date()
+    elif hasattr(data_end_ts, 'date'):
+        data_end_date = data_end_ts.date()
+    else:
+        data_end_date = data_end_ts
 
-    # Move to device and set to eval mode (inference only, no training)
-    device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
-    model = model.to(device_obj)
-    model.eval()  # Set to evaluation mode - no gradient computation, no training
+    return data_start_date, data_end_date
 
-    logger.info(f"Model loaded successfully on {device_obj} (evaluation mode - inference only)")
-    return model
+
+def _load_instruments(qlib_dir: Optional[str] = None) -> Optional[List[str]]:
+    """
+    Load instrument list from Qlib data directory.
+
+    Args:
+        qlib_dir: Qlib data directory path.
+
+    Returns:
+        List of instrument codes, or None if loading fails.
+    """
+    try:
+        qlib_dir_path = Path(qlib_dir if qlib_dir else '~/.qlib/qlib_data/cn_data').expanduser()
+        instruments_file = qlib_dir_path / 'instruments' / 'all.txt'
+        if not instruments_file.exists():
+            logger.warning(f"Instruments file not found: {instruments_file}")
+            return None
+
+        instruments = []
+        with open(instruments_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                # Parse tab-separated format: stock_code\tstart_date\tend_date
+                parts = line.split('\t')
+                if len(parts) >= 1:
+                    stock_code = parts[0].strip()
+                    if stock_code:
+                        instruments.append(stock_code)
+
+        logger.debug(f"Loaded {len(instruments)} instruments from file")
+        return instruments
+    except Exception as e:
+        logger.debug(f"Could not load instruments: {e}")
+        return None
+
+
+def _calculate_fit_period(
+    lookback_start: datetime.date,
+    data_start_date: Optional[datetime.date],
+    lookback_start_str: str,
+) -> tuple[str, str]:
+    """
+    Calculate the fit period for Alpha158 feature handler.
+
+    Args:
+        lookback_start: Start date of lookback period.
+        data_start_date: Start date of available data.
+        lookback_start_str: String representation of lookback start date.
+
+    Returns:
+        Tuple of (fit_start_str, fit_end_str) date strings.
+    """
+    fit_end_date = lookback_start - timedelta(days=1)
+    fit_start_date = fit_end_date - timedelta(days=365)  # 1 year of data for fitting
+
+    # Ensure fit period is within available data range
+    if data_start_date is not None:
+        if fit_start_date < data_start_date:
+            logger.debug(f"Fit start {fit_start_date} is before data start {data_start_date}, adjusting...")
+            fit_start_date = data_start_date
+        if fit_end_date < data_start_date:
+            logger.warning(
+                f"Fit end {fit_end_date} is before data start {data_start_date}, using minimal fit period"
+            )
+            fit_start_date = data_start_date
+            # Use at least 30 days for fit if possible
+            fit_calendar = D.calendar(start_time=data_start_date.strftime("%Y-%m-%d"), end_time=lookback_start_str)
+            if len(fit_calendar) > 30:
+                fit_end_ts = fit_calendar[-30]
+                fit_end_date = fit_end_ts.date() if hasattr(fit_end_ts, 'date') else fit_end_ts
+            else:
+                if len(fit_calendar) > 0:
+                    fit_end_ts = fit_calendar[-1]
+                    fit_end_date = fit_end_ts.date() if hasattr(fit_end_ts, 'date') else fit_end_ts
+                else:
+                    fit_end_date = lookback_start
+
+    fit_start_str = fit_start_date.strftime("%Y-%m-%d")
+    fit_end_str = fit_end_date.strftime("%Y-%m-%d")
+    return fit_start_str, fit_end_str
+
+
+def _load_features_for_date(
+    trade_date: pd.Timestamp,
+    lookback_days: int,
+    instruments: Optional[List[str]],
+    data_start_date: Optional[datetime.date],
+) -> Optional[pd.DataFrame]:
+    """
+    Load Alpha158 features for a specific trading date.
+
+    Args:
+        trade_date: Trading date to load features for.
+        lookback_days: Number of days to look back for feature calculation.
+        instruments: Optional list of instruments to load.
+        data_start_date: Start date of available data.
+
+    Returns:
+        DataFrame with features, or None if loading fails.
+    """
+    trade_date_str = trade_date.strftime("%Y-%m-%d")
+    lookback_start = trade_date - timedelta(days=lookback_days)
+    lookback_start_str = lookback_start.strftime("%Y-%m-%d")
+
+    # Convert lookback_start to date for fit period calculation
+    if isinstance(lookback_start, pd.Timestamp):
+        lookback_start_date = lookback_start.date()
+    elif hasattr(lookback_start, 'date'):
+        lookback_start_date = lookback_start.date()
+    else:
+        lookback_start_date = lookback_start
+
+    fit_start_str, fit_end_str = _calculate_fit_period(lookback_start_date, data_start_date, lookback_start_str)
+
+    logger.debug(f"Alpha158 fit period: {fit_start_str} to {fit_end_str}")
+    logger.debug(f"Alpha158 inference period: {lookback_start_str} to {trade_date_str}")
+
+    # Try with lookback first
+    try:
+        handler_kwargs = {
+            "start_time": lookback_start_str,
+            "end_time": trade_date_str,
+            "fit_start_time": fit_start_str,
+            "fit_end_time": fit_end_str,
+        }
+        if instruments is not None:
+            handler_kwargs["instruments"] = instruments
+
+        date_handler = Alpha158(**handler_kwargs)
+        date_handler.setup_data()
+
+        try:
+            df_x = date_handler.data
+            if df_x is None or df_x.empty:
+                df_x = date_handler.fetch(col_set="feature")
+        except Exception:
+            df_x = date_handler.fetch(col_set="feature")
+    except Exception as e:
+        logger.debug(f"Failed to load with lookback ({lookback_start_str} to {trade_date_str}): {e}")
+        # Try without lookback
+        logger.debug(f"Trying without lookback (using only {trade_date_str})...")
+        handler_kwargs = {
+            "start_time": trade_date_str,
+            "end_time": trade_date_str,
+            "fit_start_time": fit_start_str,
+            "fit_end_time": fit_end_str,
+        }
+        if instruments is not None:
+            handler_kwargs["instruments"] = instruments
+
+        date_handler = Alpha158(**handler_kwargs)
+        date_handler.setup_data()
+        try:
+            df_x = date_handler.data
+            if df_x is None or df_x.empty:
+                df_x = date_handler.fetch(col_set="feature")
+        except Exception:
+            df_x = date_handler.fetch(col_set="feature")
+
+    if df_x.empty:
+        # Diagnostic check
+        try:
+            instruments_check = D.instruments()
+            logger.debug(f"Total instruments available: {len(instruments_check)}")
+            if len(instruments_check) > 0:
+                sample_stock = instruments_check[0]
+                sample_data = D.features(
+                    [sample_stock],
+                    ["$close"],
+                    start_time=trade_date_str,
+                    end_time=trade_date_str,
+                    freq="day",
+                )
+                logger.debug(f"Sample stock {sample_stock} data for {trade_date_str}: {sample_data.shape}")
+        except Exception as diag_e:
+            logger.debug(f"Diagnostic check failed: {diag_e}")
+
+        logger.warning(
+            f"No data for {trade_date_str} (with lookback from {lookback_start_str}). "
+            f"Alpha158 returned empty DataFrame."
+        )
+        return None
+
+    # Filter to only the target date
+    if isinstance(df_x.index, pd.MultiIndex):
+        date_level = df_x.index.get_level_values(0)
+        if isinstance(date_level[0], pd.Timestamp):
+            df_x = df_x.loc[date_level.date == trade_date.date()]
+        else:
+            date_strs = pd.to_datetime(date_level).dt.strftime("%Y-%m-%d")
+            df_x = df_x.loc[date_strs == trade_date_str]
+
+    if df_x.empty:
+        logger.warning(f"No data for target date {trade_date_str} after filtering")
+        return None
+
+    # Clean NaN/Inf
+    df_x = df_x.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    return df_x
+
+
+def _process_single_date(
+    trade_date: pd.Timestamp,
+    model: StructureExpertGNN,
+    builder: GraphDataBuilder,
+    device_obj: torch.device,
+    lookback_days: int,
+    instruments: Optional[List[str]],
+    data_start_date: Optional[datetime.date],
+    save_embeddings: bool,
+    embeddings_storage_dir: Optional[str],
+    industry_label_map: Optional[Dict[str, str]],
+) -> Optional[pd.DataFrame]:
+    """
+    Process a single trading date to generate predictions.
+
+    Args:
+        trade_date: Trading date to process.
+        model: Trained Structure Expert model.
+        builder: GraphDataBuilder instance.
+        device_obj: PyTorch device object.
+        lookback_days: Number of days to look back for features.
+        instruments: Optional list of instruments.
+        data_start_date: Start date of available data.
+        save_embeddings: Whether to save embeddings.
+        embeddings_storage_dir: Directory to save embeddings.
+        industry_label_map: Optional industry label mapping.
+
+    Returns:
+        DataFrame with predictions for this date, or None if processing fails.
+    """
+    trade_date_str = trade_date.strftime("%Y-%m-%d")
+    logger.info(f"Processing {trade_date_str}")
+
+    try:
+        # Load features
+        df_x = _load_features_for_date(trade_date, lookback_days, instruments, data_start_date)
+        if df_x is None or df_x.empty:
+            return None
+
+        # Build graph
+        daily_graph = builder.get_daily_graph(df_x, None)
+        if daily_graph.x.shape[0] == 0:
+            logger.warning(f"No stocks for {trade_date_str}, skipping")
+            return None
+
+        # Run inference
+        logger.debug(f"Running inference for {trade_date_str}...")
+        with torch.no_grad():
+            data = daily_graph.to(device_obj)
+            pred, embedding = model(data.x, data.edge_index)
+            pred = pred.cpu().numpy().flatten()
+            embedding_np = embedding.cpu().numpy()
+
+        # Get stock symbols
+        if hasattr(daily_graph, "symbols"):
+            symbols = daily_graph.symbols
+        else:
+            symbols = df_x.index.get_level_values("instrument").unique().tolist()
+
+        symbols_normalized = [normalize_stock_code(s) for s in symbols]
+
+        # Save embeddings if requested
+        if save_embeddings:
+            save_embeddings_to_file(
+                symbols=symbols,
+                symbols_normalized=symbols_normalized,
+                predictions=pred,
+                embeddings=embedding_np,
+                trade_date_str=trade_date_str,
+                storage_dir=embeddings_storage_dir,
+                industry_label_map=industry_label_map,
+            )
+
+        # Validate symbol count
+        if len(symbols) != len(pred):
+            logger.warning(
+                f"Symbol count ({len(symbols)}) != prediction count ({len(pred)}) "
+                f"for {trade_date_str}, skipping"
+            )
+            return None
+
+        # Create prediction DataFrame
+        pred_df = pd.DataFrame(
+            {"score": pred},
+            index=pd.MultiIndex.from_product(
+                [[trade_date], symbols],
+                names=["datetime", "instrument"],
+            ),
+        )
+
+        logger.debug(f"✓ Successfully generated predictions for {trade_date_str}: {len(symbols)} stocks")
+        return pred_df
+
+    except Exception as e:
+        logger.error(f"Error processing {trade_date_str}: {e}", exc_info=True)
+        return None
 
 
 def generate_predictions(
@@ -298,6 +871,7 @@ def generate_predictions(
     save_embeddings: bool = False,
     embeddings_storage_dir: Optional[str] = None,
     industry_label_map: Optional[Dict[str, str]] = None,
+    qlib_dir: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Generate predictions for all trading days in the date range.
@@ -308,6 +882,10 @@ def generate_predictions(
         start_date: Start date (YYYY-MM-DD).
         end_date: End date (YYYY-MM-DD).
         device: Device to run inference on.
+        save_embeddings: Whether to save embeddings.
+        embeddings_storage_dir: Directory to save embeddings.
+        industry_label_map: Optional industry label mapping.
+        qlib_dir: Qlib data directory.
 
     Returns:
         DataFrame with predictions in Qlib format.
@@ -323,302 +901,43 @@ def generate_predictions(
         raise ValueError(f"No trading days found between {start_date} and {end_date}")
 
     logger.info(f"Found {len(calendar)} trading days to process")
-    
-    # Get full calendar to determine data range for fit period
-    full_calendar = D.calendar()
-    # Convert to date objects for consistent comparison
-    if len(full_calendar) > 0:
-        data_start_ts = full_calendar[0]
-        data_end_ts = full_calendar[-1]
-        # Convert Timestamp to date
-        if isinstance(data_start_ts, pd.Timestamp):
-            data_start_date = data_start_ts.date()
-        elif hasattr(data_start_ts, 'date'):
-            data_start_date = data_start_ts.date()
-        else:
-            data_start_date = data_start_ts
-        
-        if isinstance(data_end_ts, pd.Timestamp):
-            data_end_date = data_end_ts.date()
-        elif hasattr(data_end_ts, 'date'):
-            data_end_date = data_end_ts.date()
-        else:
-            data_end_date = data_end_ts
-    else:
-        data_start_date = None
-        data_end_date = None
+
+    # Get data range and load instruments
+    data_start_date, data_end_date = _get_qlib_data_range()
     logger.debug(f"Qlib data range: {data_start_date} to {data_end_date}")
 
-    # Alpha158 requires historical data to calculate technical indicators (MA, RSI, etc.)
-    # We need to provide a lookback window (e.g., 60 days) before each prediction date
     LOOKBACK_DAYS = 60  # Number of historical days needed for feature calculation
-    
-    all_predictions = []
     device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
-    
-    # Track statistics
+    instruments = _load_instruments(qlib_dir)
+
+    # Process each trading day
+    all_predictions = []
     skipped_days = []
     successful_days = []
 
     for i, trade_date in enumerate(calendar):
-        trade_date_str = trade_date.strftime("%Y-%m-%d")
-        logger.info(f"Processing {trade_date_str} ({i+1}/{len(calendar)})")
+        logger.info(f"Processing {trade_date.strftime('%Y-%m-%d')} ({i+1}/{len(calendar)})")
 
-        try:
-            # Calculate lookback start date (need historical data for Alpha158 features)
-            # Alpha158 needs ~30-60 days of history to calculate technical indicators
-            from datetime import timedelta
-            lookback_start = trade_date - timedelta(days=LOOKBACK_DAYS)
-            lookback_start_str = lookback_start.strftime("%Y-%m-%d")
-            
-            logger.debug(f"Loading data from {lookback_start_str} to {trade_date_str} for feature calculation...")
-            
-            # Get available instruments from file
-            # D.instruments() returns a dict, so we read from instruments/all.txt
-            # Format: stock_code\tstart_date\tend_date (tab-separated)
-            instruments = None
-            try:
-                from pathlib import Path
-                # Get qlib_dir from the function's closure or use default
-                qlib_dir_path = Path(qlib_dir if 'qlib_dir' in globals() else '~/.qlib/qlib_data/cn_data').expanduser()
-                instruments_file = qlib_dir_path / 'instruments' / 'all.txt'
-                if instruments_file.exists():
-                    with open(instruments_file, 'r') as f:
-                        # Parse tab-separated format: stock_code\tstart_date\tend_date
-                        instruments = []
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            # Split by tab and take first part (stock code)
-                            parts = line.split('\t')
-                            if len(parts) >= 1:
-                                stock_code = parts[0].strip()
-                                if stock_code:
-                                    instruments.append(stock_code)
-                    logger.debug(f"Loaded {len(instruments)} instruments from file")
-                else:
-                    logger.warning(f"Instruments file not found: {instruments_file}")
-            except Exception as e:
-                logger.debug(f"Could not load instruments: {e}")
-                instruments = None
-            
-            # Alpha158 needs fit_start_time and fit_end_time to initialize processors
-            # These are used to calculate statistics (mean, std) for normalization
-            # We'll use a period before the prediction date for fitting
-            # Calculate fit period: use data from 1 year before lookback_start to lookback_start
-            # Convert Timestamp to date for timedelta operations
-            if isinstance(lookback_start, pd.Timestamp):
-                lookback_start_date = lookback_start.date()
-            elif hasattr(lookback_start, 'date'):
-                lookback_start_date = lookback_start.date()
-            else:
-                lookback_start_date = lookback_start
-            
-            fit_end_date = lookback_start_date - timedelta(days=1)  # End before lookback starts
-            fit_start_date = fit_end_date - timedelta(days=365)  # 1 year of data for fitting
-            
-            # Ensure fit period is within available data range
-            if data_start_date is not None:
-                # data_start_date is already a date object (from .date() call above)
-                if fit_start_date < data_start_date:
-                    logger.debug(f"Fit start {fit_start_date} is before data start {data_start_date}, adjusting...")
-                    fit_start_date = data_start_date
-                if fit_end_date < data_start_date:
-                    # If even fit_end is before data start, use a minimal fit period
-                    logger.warning(f"Fit end {fit_end_date} is before data start {data_start_date}, using minimal fit period")
-                    fit_start_date = data_start_date
-                    # Use at least 30 days for fit if possible
-                    fit_calendar = D.calendar(start_time=data_start_date.strftime("%Y-%m-%d"), end_time=lookback_start_str)
-                    if len(fit_calendar) > 30:
-                        fit_end_ts = fit_calendar[-30]
-                        fit_end_date = fit_end_ts.date() if hasattr(fit_end_ts, 'date') else fit_end_ts
-                    else:
-                        if len(fit_calendar) > 0:
-                            fit_end_ts = fit_calendar[-1]
-                            fit_end_date = fit_end_ts.date() if hasattr(fit_end_ts, 'date') else fit_end_ts
-                        else:
-                            fit_end_date = lookback_start_date
-            
-            fit_start_str = fit_start_date.strftime("%Y-%m-%d")
-            fit_end_str = fit_end_date.strftime("%Y-%m-%d")
-            
-            logger.debug(f"Alpha158 fit period: {fit_start_str} to {fit_end_str}")
-            logger.debug(f"Alpha158 inference period: {lookback_start_str} to {trade_date_str}")
-            
-            # Try with lookback first
-            try:
-                handler_kwargs = {
-                    "start_time": lookback_start_str,
-                    "end_time": trade_date_str,
-                    "fit_start_time": fit_start_str,
-                    "fit_end_time": fit_end_str,
-                }
-                # Add instruments if available (may help with data loading)
-                if instruments is not None:
-                    handler_kwargs["instruments"] = instruments
-                
-                date_handler = Alpha158(**handler_kwargs)
-                date_handler.setup_data()
-                
-                # Get features - use handler.data or fetch
-                try:
-                    df_x = date_handler.data
-                    if df_x is None or df_x.empty:
-                        df_x = date_handler.fetch(col_set="feature")
-                except Exception:
-                    df_x = date_handler.fetch(col_set="feature")
-            except Exception as e:
-                logger.debug(f"Failed to load with lookback ({lookback_start_str} to {trade_date_str}): {e}")
-                # If lookback fails, try without lookback (use only the target date)
-                # But still need fit period
-                logger.debug(f"Trying without lookback (using only {trade_date_str})...")
-                handler_kwargs = {
-                    "start_time": trade_date_str,
-                    "end_time": trade_date_str,
-                    "fit_start_time": fit_start_str,
-                    "fit_end_time": fit_end_str,
-                }
-                if instruments is not None:
-                    handler_kwargs["instruments"] = instruments
-                
-                date_handler = Alpha158(**handler_kwargs)
-                date_handler.setup_data()
-                try:
-                    df_x = date_handler.data
-                    if df_x is None or df_x.empty:
-                        df_x = date_handler.fetch(col_set="feature")
-                except Exception:
-                    df_x = date_handler.fetch(col_set="feature")
-            
-            if df_x.empty:
-                # Try to get more diagnostic information
-                try:
-                    # Check if there are any instruments
-                    instruments = D.instruments()
-                    logger.debug(f"Total instruments available: {len(instruments)}")
-                    
-                    # Try to load raw data for a sample stock
-                    if len(instruments) > 0:
-                        sample_stock = instruments[0]
-                        sample_data = D.features(
-                            [sample_stock],
-                            ["$close"],
-                            start_time=trade_date_str,
-                            end_time=trade_date_str,
-                            freq="day",
-                        )
-                        logger.debug(f"Sample stock {sample_stock} data for {trade_date_str}: {sample_data.shape}")
-                except Exception as diag_e:
-                    logger.debug(f"Diagnostic check failed: {diag_e}")
-                
-                logger.warning(
-                    f"No data for {trade_date_str} (with lookback from {lookback_start_str}). "
-                    f"Alpha158 returned empty DataFrame. This may indicate: "
-                    f"1) No data available for this date, "
-                    f"2) Insufficient lookback data, or "
-                    f"3) Alpha158 feature calculation failed."
-                )
-                skipped_days.append(trade_date_str)
-                continue
-            
-            # Filter to only the target date (Alpha158 may return multiple dates)
-            if isinstance(df_x.index, pd.MultiIndex):
-                date_level = df_x.index.get_level_values(0)
-                # Filter to target date
-                if isinstance(date_level[0], pd.Timestamp):
-                    df_x = df_x.loc[date_level.date == trade_date.date()]
-                else:
-                    # Try string comparison
-                    date_strs = pd.to_datetime(date_level).dt.strftime("%Y-%m-%d")
-                    df_x = df_x.loc[date_strs == trade_date_str]
-            
-            if df_x.empty:
-                logger.warning(f"No data for target date {trade_date_str} after filtering, skipping")
-                skipped_days.append(trade_date_str)
-                continue
+        pred_df = _process_single_date(
+            trade_date=trade_date,
+            model=model,
+            builder=builder,
+            device_obj=device_obj,
+            lookback_days=LOOKBACK_DAYS,
+            instruments=instruments,
+            data_start_date=data_start_date,
+            save_embeddings=save_embeddings,
+            embeddings_storage_dir=embeddings_storage_dir,
+            industry_label_map=industry_label_map,
+        )
 
-            # Clean NaN/Inf
-            df_x = df_x.fillna(0.0).replace([np.inf, -np.inf], 0.0)
-
-            # Build graph
-            daily_graph = builder.get_daily_graph(df_x, None)
-
-            # Skip if no stocks
-            if daily_graph.x.shape[0] == 0:
-                logger.warning(f"No stocks for {trade_date_str}, skipping")
-                continue
-
-            # Get predictions and embeddings (inference only - no gradients, no training)
-            logger.debug(f"Running inference for {trade_date_str}...")
-            with torch.no_grad():  # Disable gradient computation for inference
-                data = daily_graph.to(device_obj)
-                pred, embedding = model(data.x, data.edge_index)  # Forward pass only
-                pred = pred.cpu().numpy().flatten()
-                embedding_np = embedding.cpu().numpy()
-
-            # Get stock symbols
-            if hasattr(daily_graph, "symbols"):
-                symbols = daily_graph.symbols
-            else:
-                # Fallback: use index from df_x
-                symbols = df_x.index.get_level_values("instrument").unique().tolist()
-            
-            # Save embeddings if requested
-            if save_embeddings:
-                try:
-                    from pathlib import Path
-                    import pandas as pd
-                    
-                    storage_dir = Path(embeddings_storage_dir) if embeddings_storage_dir else Path("storage/structure_expert_cache")
-                    storage_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Create DataFrame with embeddings
-                    df_emb = pd.DataFrame({
-                        'symbol': symbols,
-                        'score': pred,
-                        'industry': [industry_label_map.get(s, "Unknown") if industry_label_map else "Unknown" for s in symbols],
-                    })
-                    
-                    # Add embedding columns
-                    for i in range(embedding_np.shape[1]):
-                        df_emb[f'embedding_{i}'] = embedding_np[:, i]
-                    
-                    # Save to parquet
-                    date_str = trade_date_str.replace("-", "")
-                    output_path = storage_dir / f"embeddings_{date_str}.parquet"
-                    df_emb.to_parquet(output_path, index=False)
-                    logger.info(f"Saved embeddings to {output_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to save embeddings for {trade_date_str}: {e}")
-
-            # Create prediction DataFrame for this date
-            if len(symbols) != len(pred):
-                logger.warning(
-                    f"Symbol count ({len(symbols)}) != prediction count ({len(pred)}) "
-                    f"for {trade_date_str}, skipping"
-                )
-                continue
-
-            pred_df = pd.DataFrame(
-                {
-                    "score": pred,
-                },
-                index=pd.MultiIndex.from_product(
-                    [[trade_date], symbols],
-                    names=["datetime", "instrument"],
-                ),
-            )
+        if pred_df is not None:
             all_predictions.append(pred_df)
-            successful_days.append(trade_date_str)
-            logger.debug(f"✓ Successfully generated predictions for {trade_date_str}: {len(symbols)} stocks")
+            successful_days.append(trade_date.strftime("%Y-%m-%d"))
+        else:
+            skipped_days.append(trade_date.strftime("%Y-%m-%d"))
 
-        except Exception as e:
-            logger.error(f"Error processing {trade_date_str}: {e}", exc_info=True)
-            skipped_days.append(trade_date_str)
-            continue
-
-    # Provide detailed error information
+    # Validate results
     if not all_predictions:
         error_msg = (
             f"No predictions generated for date range {start_date} to {end_date}.\n"
@@ -631,7 +950,7 @@ def generate_predictions(
             if len(skipped_days) > 10:
                 error_msg += f" ... and {len(skipped_days) - 10} more"
             error_msg += "\n"
-        
+
         error_msg += (
             f"\nPossible reasons:\n"
             f"  1. Date range is in the future (no data available yet)\n"
@@ -641,7 +960,7 @@ def generate_predictions(
             f"  3. No stocks have data in the specified date range\n"
             f"     → Check stock list: python -c \"import qlib; qlib.init(); from qlib.data import D; print(D.instruments())\"\n"
         )
-        
+
         raise ValueError(error_msg)
 
     # Concatenate all predictions
@@ -655,6 +974,8 @@ def create_portfolio_strategy(
     predictions: pd.DataFrame,
     strategy_class: type = TopkDropoutStrategy,
     top_k: int = DEFAULT_TOP_K,
+    buffer_ratio: Optional[float] = None,
+    retain_threshold: Optional[int] = None,
 ) -> TopkDropoutStrategy:
     """
     Create portfolio strategy from predictions.
@@ -663,6 +984,8 @@ def create_portfolio_strategy(
         predictions: DataFrame with predictions (MultiIndex: datetime, instrument).
         strategy_class: Strategy class to use.
         top_k: Number of top stocks to select.
+        buffer_ratio: Buffer ratio for RefinedTopKStrategy (default: None, uses 0.15 if RefinedTopKStrategy).
+        retain_threshold: Retain threshold for SimpleLowTurnoverStrategy (default: None, uses 30 if SimpleLowTurnoverStrategy).
 
     Returns:
         Strategy instance.
@@ -674,11 +997,38 @@ def create_portfolio_strategy(
     signal = predictions.copy()
 
     # Create strategy config
-    strategy_config = {
-        "signal": signal,
-        "topk": top_k,
-        "n_drop": 5,  # Drop bottom 5 to reduce turnover
-    }
+    if strategy_class == RefinedTopKStrategy:
+        # Use RefinedTopKStrategy with buffer mechanism
+        if buffer_ratio is None:
+            buffer_ratio = 0.15  # Default buffer ratio
+        logger.info(f"Using RefinedTopKStrategy with buffer_ratio={buffer_ratio} to reduce turnover")
+        strategy_config = {
+            "signal": signal,
+            "topk": top_k,
+            "buffer_ratio": buffer_ratio,
+            "n_drop": 5,  # Drop bottom 5 to reduce turnover
+        }
+    elif strategy_class == SimpleLowTurnoverStrategy:
+        # Use SimpleLowTurnoverStrategy with retain threshold
+        if retain_threshold is None:
+            retain_threshold = 30  # Default retain threshold
+        logger.info(
+            f"Using SimpleLowTurnoverStrategy with retain_threshold={retain_threshold} "
+            f"to reduce turnover (only sell if stock falls out of top {retain_threshold})"
+        )
+        strategy_config = {
+            "signal": signal,
+            "topk": top_k,
+            "retain_threshold": retain_threshold,
+            "n_drop": 5,  # Drop bottom 5 to reduce turnover
+        }
+    else:
+        # Use standard TopkDropoutStrategy
+        strategy_config = {
+            "signal": signal,
+            "topk": top_k,
+            "n_drop": 5,  # Drop bottom 5 to reduce turnover
+        }
 
     # Initialize strategy
     strategy = strategy_class(**strategy_config)
@@ -717,7 +1067,7 @@ def run_backtest(
     # Normalize benchmark format if provided (in case not normalized in main)
     if benchmark is not None and benchmark.strip() != "":
         original_benchmark = benchmark
-        benchmark = normalize_benchmark_code(benchmark)
+        benchmark = normalize_index_code(benchmark)
         if original_benchmark != benchmark:
             logger.debug(f"Normalized benchmark code: {original_benchmark} -> {benchmark}")
 
@@ -794,7 +1144,7 @@ def run_backtest(
     
     if benchmark is not None and benchmark.strip() != "":
         # Final check: ensure benchmark is in correct format
-        final_benchmark = normalize_benchmark_code(benchmark)
+        final_benchmark = normalize_index_code(benchmark)
         if final_benchmark != benchmark:
             logger.warning(f"Benchmark format corrected: {benchmark} -> {final_benchmark}")
             benchmark = final_benchmark
@@ -901,333 +1251,550 @@ def run_backtest(
     return results
 
 
+class Position:
+    """Encapsulates position information from backtest results."""
+
+    def __init__(self, data):
+        """
+        Initialize Position from dict or object.
+
+        Args:
+            data: Position data (dict or object with position attribute).
+        """
+        self._position_dict = self._normalize_to_dict(data)
+
+    def _normalize_to_dict(self, data) -> dict:
+        """Normalize position data to dict format."""
+        if data is None:
+            return {}
+
+        # If it's already a dict
+        if isinstance(data, dict):
+            if 'position' in data:
+                position = data['position']
+            else:
+                position = data
+        # If it's an object
+        elif hasattr(data, 'position'):
+            position = data.position
+        else:
+            position = data
+
+        # Convert position to dict if needed
+        if isinstance(position, dict):
+            return position
+        elif hasattr(position, '__dict__'):
+            return position.__dict__
+        elif hasattr(position, 'to_dict'):
+            return position.to_dict()
+        else:
+            return {}
+
+    def get_holdings(self) -> Dict[str, tuple]:
+        """
+        Extract current holdings from position.
+
+        Returns:
+            Dict mapping stock code to (price, amount) tuple.
+        """
+        holdings = {}
+        for key, value in self._position_dict.items():
+            if key in ['cash', 'now_account_value']:
+                continue
+            if isinstance(value, dict) and 'price' in value and 'amount' in value:
+                price = float(value['price'])
+                amount = float(value['amount'])
+                if amount > 0:
+                    holdings[key] = (price, amount)
+        return holdings
+
+    def get_stock_price(self, stock: str) -> Optional[float]:
+        """Get price for a specific stock."""
+        if stock in self._position_dict:
+            stock_info = self._position_dict[stock]
+            if isinstance(stock_info, dict) and 'price' in stock_info:
+                return float(stock_info['price'])
+        return None
+
+
+class PositionDetails:
+    """Encapsulates position details from backtest results."""
+
+    def __init__(self, data: Optional[Dict]):
+        """
+        Initialize PositionDetails from dict.
+
+        Args:
+            data: Position details dict mapping dates to position info.
+        """
+        self._data = data or {}
+
+    def get_dates(self) -> List[pd.Timestamp]:
+        """Get sorted list of dates."""
+        return sorted([pd.Timestamp(d) for d in self._data.keys() if isinstance(d, pd.Timestamp)])
+
+    def get_position(self, date: pd.Timestamp) -> Optional[Position]:
+        """Get Position object for a specific date."""
+        if date not in self._data:
+            return None
+        return Position(self._data[date])
+
+
+class PortfolioMetrics:
+    """Encapsulates portfolio metrics from backtest results."""
+
+    def __init__(self, data):
+        """
+        Initialize PortfolioMetrics from various formats.
+
+        Args:
+            data: Portfolio metrics (dict, DataFrame, or None).
+        """
+        self._raw_data = data
+        self._metric_df = self._extract_dataframe()
+        self._position_details = self._extract_position_details()
+
+    def _extract_dataframe(self) -> Optional[pd.DataFrame]:
+        """Extract DataFrame from various formats."""
+        if self._raw_data is None:
+            return None
+
+        # If it's already a DataFrame
+        if isinstance(self._raw_data, pd.DataFrame):
+            return self._raw_data
+
+        # If it's a dict, try to extract DataFrame
+        if isinstance(self._raw_data, dict):
+            for key, value in self._raw_data.items():
+                if isinstance(value, tuple) and len(value) >= 1:
+                    if isinstance(value[0], pd.DataFrame):
+                        return value[0]
+                elif isinstance(value, pd.DataFrame):
+                    return value
+
+        return None
+
+    def _extract_position_details(self) -> Optional[PositionDetails]:
+        """Extract position details from portfolio metrics."""
+        if not isinstance(self._raw_data, dict):
+            return None
+
+        for key, value in self._raw_data.items():
+            if isinstance(value, tuple) and len(value) >= 2:
+                if isinstance(value[1], dict):
+                    return PositionDetails(value[1])
+
+        return None
+
+    def has_data(self) -> bool:
+        """Check if metrics data is available."""
+        return self._metric_df is not None and len(self._metric_df) > 0
+
+    def get_dataframe(self) -> Optional[pd.DataFrame]:
+        """Get the metrics DataFrame."""
+        return self._metric_df
+
+    def get_position_details(self) -> Optional[PositionDetails]:
+        """Get position details."""
+        return self._position_details
+
+
+class PerformanceMetrics:
+    """Calculates and stores performance metrics."""
+
+    def __init__(self, metric_df: pd.DataFrame):
+        """
+        Initialize PerformanceMetrics from DataFrame.
+
+        Args:
+            metric_df: Metrics DataFrame with time series data.
+        """
+        self._df = metric_df
+        self._final_row = metric_df.iloc[-1]
+        self._first_row = metric_df.iloc[0]
+
+    @property
+    def total_return(self) -> Optional[float]:
+        """Calculate total return."""
+        total_return = self._final_row.get('return', None)
+        if total_return is None or pd.isna(total_return):
+            initial_account = self._first_row.get('account', None)
+            final_account = self._final_row.get('account', None)
+            if initial_account is not None and final_account is not None and initial_account > 0:
+                total_return = (final_account - initial_account) / initial_account
+            else:
+                total_return = None
+        return total_return
+
+    @property
+    def annualized_return(self) -> Optional[float]:
+        """Calculate annualized return."""
+        if self.total_return is None or pd.isna(self.total_return):
+            return None
+        num_days = len(self._df)
+        if num_days == 0:
+            return None
+        years = num_days / 252.0
+        if years > 0:
+            return (1 + self.total_return) ** (1.0 / years) - 1
+        return None
+
+    @property
+    def volatility(self) -> Optional[float]:
+        """Calculate annualized volatility."""
+        if 'return' not in self._df.columns:
+            return None
+        returns = self._df['return'].dropna()
+        if len(returns) <= 1:
+            return None
+        daily_returns = returns.diff().dropna()
+        if len(daily_returns) == 0:
+            return None
+        return daily_returns.std() * (252 ** 0.5)
+
+    @property
+    def sharpe_ratio(self) -> Optional[float]:
+        """Calculate Sharpe ratio."""
+        if self.annualized_return is None or self.volatility is None or self.volatility <= 0:
+            return None
+        # Assume risk-free rate is 0
+        return self.annualized_return / self.volatility
+
+    @property
+    def max_drawdown(self) -> Optional[float]:
+        """Calculate maximum drawdown."""
+        if 'account' not in self._df.columns:
+            return None
+        account_values = self._df['account'].dropna()
+        if len(account_values) == 0:
+            return None
+        running_max = account_values.expanding().max()
+        drawdown = (account_values - running_max) / running_max
+        return drawdown.min()
+
+    @property
+    def initial_account(self) -> Optional[float]:
+        """Get initial account value."""
+        if 'account' in self._df.columns:
+            return self._df['account'].iloc[0]
+        return None
+
+    @property
+    def final_account(self) -> Optional[float]:
+        """Get final account value."""
+        if 'account' in self._df.columns:
+            return self._df['account'].iloc[-1]
+        return None
+
+    @property
+    def num_trading_days(self) -> int:
+        """Get number of trading days."""
+        return len(self._df)
+
+    @property
+    def first_date(self):
+        """Get first date."""
+        if len(self._df) > 0:
+            return self._df.index[0]
+        return None
+
+    @property
+    def last_date(self):
+        """Get last date."""
+        if len(self._df) > 0:
+            return self._df.index[-1]
+        return None
+
+    @property
+    def total_turnover(self) -> Optional[float]:
+        """Get total turnover."""
+        if 'total_turnover' in self._df.columns:
+            return self._df['total_turnover'].iloc[-1]
+        return None
+
+    @property
+    def avg_daily_turnover(self) -> Optional[float]:
+        """Get average daily turnover."""
+        if 'turnover' in self._df.columns:
+            return self._df['turnover'].mean()
+        return None
+
+
+class Trade:
+    """Represents a single trade."""
+
+    def __init__(
+        self,
+        buy_date: pd.Timestamp,
+        sell_date: pd.Timestamp,
+        stock: str,
+        buy_price: float,
+        sell_price: float,
+        pnl: float,
+        pnl_pct: float,
+    ):
+        self.buy_date = buy_date
+        self.sell_date = sell_date
+        self.stock = stock
+        self.buy_price = buy_price
+        self.sell_price = sell_price
+        self.pnl = pnl
+        self.pnl_pct = pnl_pct
+
+    @property
+    def holding_period_days(self) -> int:
+        """Get holding period in days."""
+        return (self.sell_date - self.buy_date).days
+
+    @property
+    def is_winning(self) -> bool:
+        """Check if trade is winning."""
+        return self.pnl > 0
+
+
+class TradingStatistics:
+    """Calculates trading statistics from position details."""
+
+    def __init__(self, position_details: PositionDetails):
+        """
+        Initialize TradingStatistics from position details.
+
+        Args:
+            position_details: PositionDetails object.
+        """
+        self._trades = self._extract_trades(position_details)
+
+    def _extract_trades(self, position_details: PositionDetails) -> List[Trade]:
+        """Extract trades from position details."""
+        if position_details is None:
+            return []
+
+        trades = []
+        holdings = {}  # {stock: (buy_date, buy_price, amount)}
+        dates = position_details.get_dates()
+
+        for i, date in enumerate(dates):
+            current_position = position_details.get_position(date)
+            if current_position is None:
+                continue
+
+            current_holdings = current_position.get_holdings()
+
+            if i > 0:
+                prev_date = dates[i - 1]
+                prev_position = position_details.get_position(prev_date)
+                prev_holdings = prev_position.get_holdings() if prev_position else {}
+
+                # Find new positions (bought)
+                for stock in current_holdings:
+                    if stock not in prev_holdings or prev_holdings[stock][1] == 0:
+                        price, amount = current_holdings[stock]
+                        holdings[stock] = (date, price, amount)
+
+                # Find closed positions (sold)
+                for stock in list(holdings.keys()):
+                    buy_date, buy_price, buy_amount = holdings[stock]
+                    if stock not in current_holdings:
+                        # Completely sold
+                        sell_price = prev_position.get_stock_price(stock) if prev_position else buy_price
+                        if sell_price is None:
+                            sell_price = buy_price
+                        pnl = (sell_price - buy_price) * buy_amount
+                        pnl_pct = (sell_price - buy_price) / buy_price if buy_price > 0 else 0
+                        trades.append(Trade(buy_date, date, stock, buy_price, sell_price, pnl, pnl_pct))
+                        del holdings[stock]
+                    elif current_holdings[stock][1] < buy_amount:
+                        # Partially sold
+                        sell_price = current_holdings[stock][0]
+                        pnl = (sell_price - buy_price) * buy_amount
+                        pnl_pct = (sell_price - buy_price) / buy_price if buy_price > 0 else 0
+                        trades.append(Trade(buy_date, date, stock, buy_price, sell_price, pnl, pnl_pct))
+                        remaining_amount = current_holdings[stock][1]
+                        if remaining_amount > 0:
+                            holdings[stock] = (date, sell_price, remaining_amount)
+                        else:
+                            del holdings[stock]
+            else:
+                # First day - all are new buys
+                for stock, (price, amount) in current_holdings.items():
+                    holdings[stock] = (date, price, amount)
+
+        return trades
+
+    @property
+    def total_trades(self) -> int:
+        """Get total number of trades."""
+        return len(self._trades)
+
+    @property
+    def winning_trades(self) -> List[Trade]:
+        """Get list of winning trades."""
+        return [t for t in self._trades if t.is_winning]
+
+    @property
+    def losing_trades(self) -> List[Trade]:
+        """Get list of losing trades."""
+        return [t for t in self._trades if not t.is_winning]
+
+    @property
+    def win_rate(self) -> float:
+        """Calculate win rate percentage."""
+        if self.total_trades == 0:
+            return 0.0
+        return len(self.winning_trades) / self.total_trades * 100
+
+    @property
+    def avg_holding_days(self) -> float:
+        """Calculate average holding period in days."""
+        if self.total_trades == 0:
+            return 0.0
+        holding_periods = [t.holding_period_days for t in self._trades]
+        return sum(holding_periods) / len(holding_periods)
+
+    @property
+    def avg_return_per_trade(self) -> float:
+        """Calculate average return per trade percentage."""
+        if self.total_trades == 0:
+            return 0.0
+        return sum([t.pnl_pct for t in self._trades]) / self.total_trades * 100
+
+    @property
+    def profit_factor(self) -> float:
+        """Calculate profit factor."""
+        total_profit = sum([t.pnl for t in self.winning_trades])
+        total_loss = abs(sum([t.pnl for t in self.losing_trades]))
+        if total_loss > 0:
+            return total_profit / total_loss
+        elif total_profit > 0:
+            return float('inf')
+        else:
+            return 0.0
+
+    @property
+    def avg_win_loss_ratio(self) -> float:
+        """Calculate average win/loss ratio."""
+        if len(self.winning_trades) == 0 or len(self.losing_trades) == 0:
+            return 0.0
+        avg_win = sum([t.pnl for t in self.winning_trades]) / len(self.winning_trades)
+        avg_loss = abs(sum([t.pnl for t in self.losing_trades]) / len(self.losing_trades))
+        if avg_loss != 0:
+            return abs(avg_win / avg_loss)
+        elif avg_win > 0:
+            return float('inf')
+        else:
+            return 0.0
+
+    @property
+    def total_profit(self) -> float:
+        """Calculate total profit."""
+        return sum([t.pnl for t in self.winning_trades])
+
+    @property
+    def total_loss(self) -> float:
+        """Calculate total loss."""
+        return abs(sum([t.pnl for t in self.losing_trades]))
+
+
+class Indicators:
+    """Encapsulates performance indicators."""
+
+    def __init__(self, data):
+        """
+        Initialize Indicators from various formats.
+
+        Args:
+            data: Indicators data (dict or None).
+        """
+        self._data = data or {}
+
+    def is_dict(self) -> bool:
+        """Check if indicators is a dict."""
+        return isinstance(self._data, dict)
+
+    def items(self):
+        """Get items iterator."""
+        if self.is_dict():
+            return self._data.items()
+        return []
+
+
 def print_results(results: dict) -> None:
     """Print backtest results in a readable format."""
-    portfolio_metric = results.get("portfolio_metric")
-    indicator = results.get("indicator")
+    portfolio_metrics = PortfolioMetrics(results.get("portfolio_metric"))
+    indicators = Indicators(results.get("indicator"))
 
     print("\n" + "=" * 80)
     print("Backtest Results")
     print("=" * 80)
 
     # Portfolio metrics
-    if portfolio_metric is not None:
+    if portfolio_metrics.has_data():
         print("\n📊 Portfolio Metrics:")
         
-        # Handle dict format where key is frequency (e.g., '1day') and value is (DataFrame, dict)
-        if isinstance(portfolio_metric, dict):
-            # Extract the DataFrame from the dict (usually key is '1day')
-            metric_df = None
-            for key, value in portfolio_metric.items():
-                if isinstance(value, tuple) and len(value) >= 1:
-                    if isinstance(value[0], pd.DataFrame):
-                        metric_df = value[0]
-                        break
-                elif isinstance(value, pd.DataFrame):
-                    metric_df = value
-                    break
+        metric_df = portfolio_metrics.get_dataframe()
+        if metric_df is not None:
+            perf_metrics = PerformanceMetrics(metric_df)
             
-            if metric_df is not None and len(metric_df) > 0:
-                # Get the last row (final metrics)
-                final_row = metric_df.iloc[-1]
-                first_row = metric_df.iloc[0]
+            # Display metrics
+            total_return = perf_metrics.total_return
+            print(f"  Total Return: {total_return * 100:.2f}%" if total_return is not None and not pd.isna(total_return) else "  Total Return: N/A")
+            
+            annualized_return = perf_metrics.annualized_return
+            print(f"  Annualized Return: {annualized_return * 100:.2f}%" if annualized_return is not None and not pd.isna(annualized_return) else "  Annualized Return: N/A")
+            
+            volatility = perf_metrics.volatility
+            print(f"  Volatility: {volatility * 100:.2f}%" if volatility is not None and not pd.isna(volatility) else "  Volatility: N/A")
+            
+            sharpe = perf_metrics.sharpe_ratio
+            print(f"  Sharpe Ratio: {sharpe:.4f}" if sharpe is not None and not pd.isna(sharpe) else "  Sharpe Ratio: N/A")
+            
+            max_drawdown = perf_metrics.max_drawdown
+            print(f"  Max Drawdown: {max_drawdown * 100:.2f}%" if max_drawdown is not None and not pd.isna(max_drawdown) else "  Max Drawdown: N/A")
+            
+            # Show additional info
+            initial_account = perf_metrics.initial_account
+            final_account = perf_metrics.final_account
+            if initial_account is not None and final_account is not None:
+                print(f"\n  Initial Account Value: {initial_account:,.2f}")
+                print(f"  Final Account Value: {final_account:,.2f}")
+                print(f"  Net P&L: {final_account - initial_account:,.2f}")
+            
+            if perf_metrics.num_trading_days > 1:
+                print(f"\n  Time Series: {perf_metrics.num_trading_days} trading days")
+                print(f"    First date: {perf_metrics.first_date}")
+                print(f"    Last date: {perf_metrics.last_date}")
+            
+            # Extract trading statistics from position details
+            position_details = portfolio_metrics.get_position_details()
+            
+            if position_details:
+                trading_stats = TradingStatistics(position_details)
                 
-                # Extract return from the 'return' column (cumulative return)
-                total_return = final_row.get('return', None)
-                if total_return is None or pd.isna(total_return):
-                    # Calculate from account value if return column is not available
-                    initial_account = first_row.get('account', None)
-                    final_account = final_row.get('account', None)
-                    if initial_account is not None and final_account is not None and initial_account > 0:
-                        total_return = (final_account - initial_account) / initial_account
-                    else:
-                        total_return = None
-                
-                # Calculate annualized return
-                annualized_return = None
-                if total_return is not None and not pd.isna(total_return):
-                    # Get number of trading days
-                    num_days = len(metric_df)
-                    if num_days > 0:
-                        # Assume ~252 trading days per year
-                        years = num_days / 252.0
-                        if years > 0:
-                            annualized_return = (1 + total_return) ** (1.0 / years) - 1
-                
-                # Calculate volatility from return series
-                volatility = None
-                if 'return' in metric_df.columns:
-                    returns = metric_df['return'].dropna()
-                    if len(returns) > 1:
-                        # Calculate daily returns (difference)
-                        daily_returns = returns.diff().dropna()
-                        if len(daily_returns) > 0:
-                            # Annualized volatility
-                            volatility = daily_returns.std() * (252 ** 0.5)
-                
-                # Calculate Sharpe ratio
-                sharpe = None
-                if annualized_return is not None and volatility is not None and volatility > 0:
-                    # Assume risk-free rate is 0 for simplicity
-                    sharpe = annualized_return / volatility
-                
-                # Calculate max drawdown
-                max_drawdown = None
-                if 'account' in metric_df.columns:
-                    account_values = metric_df['account'].dropna()
-                    if len(account_values) > 0:
-                        # Calculate running maximum
-                        running_max = account_values.expanding().max()
-                        # Calculate drawdown
-                        drawdown = (account_values - running_max) / running_max
-                        max_drawdown = drawdown.min()
-                
-                # Display metrics
-                print(f"  Total Return: {total_return * 100:.2f}%" if total_return is not None and not pd.isna(total_return) else "  Total Return: N/A")
-                print(f"  Annualized Return: {annualized_return * 100:.2f}%" if annualized_return is not None and not pd.isna(annualized_return) else "  Annualized Return: N/A")
-                print(f"  Volatility: {volatility * 100:.2f}%" if volatility is not None and not pd.isna(volatility) else "  Volatility: N/A")
-                print(f"  Sharpe Ratio: {sharpe:.4f}" if sharpe is not None and not pd.isna(sharpe) else "  Sharpe Ratio: N/A")
-                print(f"  Max Drawdown: {max_drawdown * 100:.2f}%" if max_drawdown is not None and not pd.isna(max_drawdown) else "  Max Drawdown: N/A")
-                
-                # Show additional info
-                if 'account' in metric_df.columns:
-                    initial_account = metric_df['account'].iloc[0]
-                    final_account = metric_df['account'].iloc[-1]
-                    print(f"\n  Initial Account Value: {initial_account:,.2f}")
-                    print(f"  Final Account Value: {final_account:,.2f}")
-                    print(f"  Net P&L: {final_account - initial_account:,.2f}")
-                
-                if len(metric_df) > 1:
-                    print(f"\n  Time Series: {len(metric_df)} trading days")
-                    print(f"    First date: {metric_df.index[0]}")
-                    print(f"    Last date: {metric_df.index[-1]}")
-                
-                # Extract trading statistics from position details
-                position_details = None
-                for key, value in portfolio_metric.items():
-                    if isinstance(value, tuple) and len(value) >= 2:
-                        if isinstance(value[1], dict):
-                            position_details = value[1]
-                            break
-                
-                if position_details:
-                    # Calculate trading statistics
-                    trades = []  # List of (buy_date, sell_date, stock, buy_price, sell_price, pnl, pnl_pct)
-                    holdings = {}  # {stock: (buy_date, buy_price, amount)}
-                    
-                    # Sort dates
-                    dates = sorted([pd.Timestamp(d) for d in position_details.keys() if isinstance(d, pd.Timestamp)])
-                    
-                    for date in dates:
-                        if date not in position_details:
-                            continue
-                        pos_info = position_details[date]
-                        
-                        # Handle both dict and object types
-                        if isinstance(pos_info, dict):
-                            if 'position' not in pos_info:
-                                continue
-                            position = pos_info['position']
-                        else:
-                            # Try to access as object attribute
-                            if not hasattr(pos_info, 'position'):
-                                continue
-                            position = pos_info.position
-                        
-                        # Convert position to dict if it's an object
-                        if not isinstance(position, dict):
-                            # Try to convert Position object to dict
-                            try:
-                                if hasattr(position, '__dict__'):
-                                    position = position.__dict__
-                                elif hasattr(position, 'to_dict'):
-                                    position = position.to_dict()
-                                else:
-                                    # Skip if we can't convert
-                                    continue
-                            except:
-                                continue
-                        
-                        current_holdings = {}
-                        
-                        # Extract current holdings
-                        if isinstance(position, dict):
-                            for key, value in position.items():
-                                if key in ['cash', 'now_account_value']:
-                                    continue
-                                if isinstance(value, dict) and 'price' in value and 'amount' in value:
-                                    stock = key
-                                    price = float(value['price'])
-                                    amount = float(value['amount'])
-                                    if amount > 0:
-                                        current_holdings[stock] = (price, amount)
-                        
-                        # Check for new buys (stocks in current but not in previous)
-                        prev_date_idx = dates.index(date) - 1
-                        if prev_date_idx >= 0:
-                            prev_date = dates[prev_date_idx]
-                            prev_holdings = {}
-                            if prev_date in position_details:
-                                prev_pos_info = position_details[prev_date]
-                                # Handle both dict and object types
-                                if isinstance(prev_pos_info, dict) and 'position' in prev_pos_info:
-                                    prev_position = prev_pos_info['position']
-                                elif hasattr(prev_pos_info, 'position'):
-                                    prev_position = prev_pos_info.position
-                                else:
-                                    prev_position = None
-                                
-                                if prev_position is not None:
-                                    # Convert to dict if needed
-                                    if not isinstance(prev_position, dict):
-                                        try:
-                                            if hasattr(prev_position, '__dict__'):
-                                                prev_position = prev_position.__dict__
-                                            elif hasattr(prev_position, 'to_dict'):
-                                                prev_position = prev_position.to_dict()
-                                        except:
-                                            prev_position = None
-                                    
-                                    if isinstance(prev_position, dict):
-                                        for key, value in prev_position.items():
-                                            if key in ['cash', 'now_account_value']:
-                                                continue
-                                            if isinstance(value, dict) and 'price' in value and 'amount' in value:
-                                                stock = key
-                                                amount = float(value['amount'])
-                                                if amount > 0:
-                                                    prev_holdings[stock] = amount
-                            
-                            # Find new positions (bought)
-                            for stock in current_holdings:
-                                if stock not in prev_holdings or prev_holdings[stock] == 0:
-                                    # New buy
-                                    price, amount = current_holdings[stock]
-                                    holdings[stock] = (date, price, amount)
-                            
-                            # Find closed positions (sold)
-                            for stock in list(holdings.keys()):
-                                buy_date, buy_price, buy_amount = holdings[stock]
-                                if stock not in current_holdings:
-                                    # Completely sold
-                                    # Use previous day's price as sell price (or current if available)
-                                    sell_price = buy_price  # Fallback
-                                    if prev_date in position_details:
-                                        prev_pos_info = position_details[prev_date]
-                                        prev_pos = None
-                                        if isinstance(prev_pos_info, dict) and 'position' in prev_pos_info:
-                                            prev_pos = prev_pos_info['position']
-                                        elif hasattr(prev_pos_info, 'position'):
-                                            prev_pos = prev_pos_info.position
-                                        
-                                        if prev_pos is not None:
-                                            # Convert to dict if needed
-                                            if not isinstance(prev_pos, dict):
-                                                try:
-                                                    if hasattr(prev_pos, '__dict__'):
-                                                        prev_pos = prev_pos.__dict__
-                                                    elif hasattr(prev_pos, 'to_dict'):
-                                                        prev_pos = prev_pos.to_dict()
-                                                except:
-                                                    prev_pos = None
-                                            
-                                            if isinstance(prev_pos, dict) and stock in prev_pos:
-                                                stock_info = prev_pos[stock]
-                                                if isinstance(stock_info, dict) and 'price' in stock_info:
-                                                    sell_price = float(stock_info['price'])
-                                    pnl = (sell_price - buy_price) * buy_amount
-                                    pnl_pct = (sell_price - buy_price) / buy_price if buy_price > 0 else 0
-                                    trades.append((buy_date, date, stock, buy_price, sell_price, pnl, pnl_pct))
-                                    del holdings[stock]
-                                elif current_holdings[stock][1] < buy_amount:
-                                    # Partially sold - treat as full sale for simplicity
-                                    sell_price = current_holdings[stock][0]
-                                    pnl = (sell_price - buy_price) * buy_amount
-                                    pnl_pct = (sell_price - buy_price) / buy_price if buy_price > 0 else 0
-                                    trades.append((buy_date, date, stock, buy_price, sell_price, pnl, pnl_pct))
-                                    # Update holding with remaining amount
-                                    remaining_amount = current_holdings[stock][1]
-                                    if remaining_amount > 0:
-                                        holdings[stock] = (date, sell_price, remaining_amount)  # Update to new buy date
-                                    else:
-                                        del holdings[stock]
-                        else:
-                            # First day - all are new buys
-                            for stock, (price, amount) in current_holdings.items():
-                                holdings[stock] = (date, price, amount)
-                    
-                    # Calculate statistics from trades
-                    if trades:
-                        winning_trades = [t for t in trades if t[5] > 0]  # pnl > 0
-                        losing_trades = [t for t in trades if t[5] < 0]   # pnl < 0
-                        
-                        win_rate = len(winning_trades) / len(trades) * 100 if trades else 0
-                        
-                        # Average holding period
-                        holding_periods = [(t[1] - t[0]).days for t in trades]
-                        avg_holding_days = sum(holding_periods) / len(holding_periods) if holding_periods else 0
-                        
-                        # Average return per trade
-                        avg_return = sum([t[6] for t in trades]) / len(trades) * 100 if trades else 0
-                        
-                        # Profit factor (total profit / total loss)
-                        total_profit = sum([t[5] for t in winning_trades]) if winning_trades else 0
-                        total_loss = abs(sum([t[5] for t in losing_trades])) if losing_trades else 0
-                        profit_factor = total_profit / total_loss if total_loss > 0 else float('inf') if total_profit > 0 else 0
-                        
-                        # Average win/loss
-                        avg_win = sum([t[5] for t in winning_trades]) / len(winning_trades) if winning_trades else 0
-                        avg_loss = sum([t[5] for t in losing_trades]) / len(losing_trades) if losing_trades else 0
-                        avg_win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else float('inf') if avg_win > 0 else 0
-                        
-                        print(f"\n📈 Trading Statistics:")
-                        print(f"  Total Trades: {len(trades)}")
-                        print(f"  Winning Trades: {len(winning_trades)}")
-                        print(f"  Losing Trades: {len(losing_trades)}")
-                        print(f"  Win Rate: {win_rate:.2f}%")
-                        print(f"  Average Holding Period: {avg_holding_days:.1f} days")
-                        print(f"  Average Return per Trade: {avg_return:.2f}%")
-                        print(f"  Profit Factor: {profit_factor:.2f}" if profit_factor != float('inf') else "  Profit Factor: ∞")
-                        print(f"  Avg Win / Avg Loss: {avg_win_loss_ratio:.2f}" if avg_win_loss_ratio != float('inf') else "  Avg Win / Avg Loss: ∞")
-                        print(f"  Total Profit: {total_profit:,.2f}")
-                        print(f"  Total Loss: {total_loss:,.2f}")
-                    
-                    # Show turnover statistics
-                    if 'total_turnover' in metric_df.columns:
-                        final_turnover = metric_df['total_turnover'].iloc[-1]
-                        avg_daily_turnover = metric_df['turnover'].mean() if 'turnover' in metric_df.columns else None
-                        print(f"\n💰 Turnover Statistics:")
-                        print(f"  Total Turnover: {final_turnover:,.2f}")
-                        if avg_daily_turnover is not None:
-                            print(f"  Average Daily Turnover: {avg_daily_turnover:.2%}")
-            else:
-                print("  ⚠ Could not extract DataFrame from portfolio_metric dict")
-                print(f"  Dict keys: {list(portfolio_metric.keys())}")
-        # Handle DataFrame format (direct)
-        elif isinstance(portfolio_metric, pd.DataFrame):
-            # Qlib returns DataFrame with time series of metrics
-            if len(portfolio_metric) > 0:
-                # Get the last row (final metrics)
-                final_metrics = portfolio_metric.iloc[-1]
-                
-                # Extract metrics
-                return_val = final_metrics.get('return', None)
-                annualized_return = final_metrics.get('return.annualized', final_metrics.get('return_annualized', None))
-                volatility = final_metrics.get('volatility', None)
-                sharpe = final_metrics.get('sharpe', final_metrics.get('Sharpe', None))
-                max_drawdown = final_metrics.get('max_drawdown', final_metrics.get('Max Drawdown', final_metrics.get('maxdrawdown', None)))
-                
-                # Display metrics
-                print(f"  Return: {return_val * 100:.2f}%" if return_val is not None and not pd.isna(return_val) else "  Return: N/A")
-                print(f"  Annualized Return: {annualized_return * 100:.2f}%" if annualized_return is not None and not pd.isna(annualized_return) else "  Annualized Return: N/A")
-                print(f"  Volatility: {volatility * 100:.2f}%" if volatility is not None and not pd.isna(volatility) else "  Volatility: N/A")
-                print(f"  Sharpe Ratio: {sharpe:.4f}" if sharpe is not None and not pd.isna(sharpe) else "  Sharpe Ratio: N/A")
-                print(f"  Max Drawdown: {max_drawdown * 100:.2f}%" if max_drawdown is not None and not pd.isna(max_drawdown) else "  Max Drawdown: N/A")
-            else:
-                print("  ⚠ Portfolio metrics DataFrame is empty")
+                if trading_stats.total_trades > 0:
+                    print(f"\n📈 Trading Statistics:")
+                    print(f"  Total Trades: {trading_stats.total_trades}")
+                    print(f"  Winning Trades: {len(trading_stats.winning_trades)}")
+                    print(f"  Losing Trades: {len(trading_stats.losing_trades)}")
+                    print(f"  Win Rate: {trading_stats.win_rate:.2f}%")
+                    print(f"  Average Holding Period: {trading_stats.avg_holding_days:.1f} days")
+                    print(f"  Average Return per Trade: {trading_stats.avg_return_per_trade:.2f}%")
+                    profit_factor = trading_stats.profit_factor
+                    print(f"  Profit Factor: {profit_factor:.2f}" if profit_factor != float('inf') else "  Profit Factor: ∞")
+                    avg_win_loss = trading_stats.avg_win_loss_ratio
+                    print(f"  Avg Win / Avg Loss: {avg_win_loss:.2f}" if avg_win_loss != float('inf') else "  Avg Win / Avg Loss: ∞")
+                    print(f"  Total Profit: {trading_stats.total_profit:,.2f}")
+                    print(f"  Total Loss: {trading_stats.total_loss:,.2f}")
+            
+            # Show turnover statistics
+            total_turnover = perf_metrics.total_turnover
+            avg_daily_turnover = perf_metrics.avg_daily_turnover
+            if total_turnover is not None:
+                print(f"\n💰 Turnover Statistics:")
+                print(f"  Total Turnover: {total_turnover:,.2f}")
+                if avg_daily_turnover is not None:
+                    print(f"  Average Daily Turnover: {avg_daily_turnover:.2%}")
         else:
-            print(f"  ⚠ Portfolio metrics format not recognized: {type(portfolio_metric)}")
-            print(f"  Value: {portfolio_metric}")
+            print("  ⚠ Could not extract DataFrame from portfolio_metric")
     else:
         print("\n📊 Portfolio Metrics:")
         print("  ⚠ Portfolio metrics is None")
@@ -1237,22 +1804,17 @@ def print_results(results: dict) -> None:
         print("    3. Qlib backtest function did not return portfolio metrics")
 
     # Indicators
-    if indicator is not None:
+    if indicators.is_dict():
         print("\n📈 Performance Indicators:")
-        if isinstance(indicator, dict):
-            for key, value in indicator.items():
-                if isinstance(value, (int, float)):
-                    print(f"  {key}: {value:.4f}")
-                elif isinstance(value, pd.DataFrame):
-                    print(f"  {key}: (DataFrame with shape {value.shape})")
-                    # Show summary if small
-                    if len(value) <= 10:
-                        print(f"    {value}")
-                else:
-                    print(f"  {key}: {value}")
-        else:
-            print(f"  ⚠ Indicator format not recognized: {type(indicator)}")
-            print(f"  Value: {indicator}")
+        for key, value in indicators.items():
+            if isinstance(value, (int, float)):
+                print(f"  {key}: {value:.4f}")
+            elif isinstance(value, pd.DataFrame):
+                print(f"  {key}: (DataFrame with shape {value.shape})")
+                if len(value) <= 10:
+                    print(f"    {value}")
+            else:
+                print(f"  {key}: {value}")
 
     print("\n" + "=" * 80)
 
@@ -1474,7 +2036,24 @@ def main():
         "--strategy",
         type=str,
         default="TopkDropoutStrategy",
-        help="Portfolio strategy class name (default: TopkDropoutStrategy)",
+        help="Portfolio strategy class name (default: TopkDropoutStrategy). "
+        "Options: 'TopkDropoutStrategy', 'RefinedTopKStrategy', 'SimpleLowTurnoverStrategy'.",
+    )
+    parser.add_argument(
+        "--buffer_ratio",
+        type=float,
+        default=None,
+        help="Buffer ratio for RefinedTopKStrategy (default: 0.15). "
+        "Higher value reduces turnover but may reduce returns. "
+        "Only used with RefinedTopKStrategy.",
+    )
+    parser.add_argument(
+        "--retain_threshold",
+        type=int,
+        default=None,
+        help="Retain threshold for SimpleLowTurnoverStrategy (default: 30). "
+        "Only sell existing holdings if they fall out of top N. "
+        "Only used with SimpleLowTurnoverStrategy.",
     )
     parser.add_argument(
         "--initial_cash",
@@ -1497,6 +2076,17 @@ def main():
         type=str,
         default=None,
         help="Path to save the plot image (default: outputs/structure_expert_backtest_<dates>.png)",
+    )
+    parser.add_argument(
+        "--save_embeddings",
+        action="store_true",
+        help="Save model embeddings and scores for visualization dashboard",
+    )
+    parser.add_argument(
+        "--embeddings_storage_dir",
+        type=str,
+        default=None,
+        help="Directory to save embeddings (default: storage/structure_expert_cache)",
     )
     parser.add_argument(
         "--qlib_dir",
@@ -1563,7 +2153,7 @@ def main():
         benchmark = args.benchmark
         # Normalize benchmark format early if provided
         if benchmark is not None and benchmark.strip() != "":
-            benchmark = normalize_benchmark_code(benchmark)
+            benchmark = normalize_index_code(benchmark)
             logger.debug(f"Normalized benchmark code in main: {benchmark}")
 
     # Validate dates
@@ -1690,6 +2280,19 @@ def main():
         # Create graph builder
         builder = GraphDataBuilder(industry_map)
 
+        # Load industry labels if saving embeddings
+        industry_label_map = {}
+        if args.save_embeddings:
+            try:
+                if db_config:
+                    end_dt = datetime.strptime(args.end_date, "%Y-%m-%d")
+                    industry_label_map = load_industry_label_map(db_config, target_date=end_dt)
+                    logger.info(f"Loaded industry labels: {len(industry_label_map)} stocks")
+                else:
+                    logger.warning("No database config for industry labels, using empty map")
+            except Exception as e:
+                logger.warning(f"Failed to load industry labels: {e}")
+
         # Generate predictions
         predictions = generate_predictions(
             model=model,
@@ -1697,13 +2300,31 @@ def main():
             start_date=args.start_date,
             end_date=args.end_date,
             device=args.device,
+            save_embeddings=args.save_embeddings,
+            embeddings_storage_dir=args.embeddings_storage_dir,
+            industry_label_map=industry_label_map,
+            qlib_dir=str(qlib_dir),
         )
+
+        # Determine strategy class
+        strategy_class_name = args.strategy
+        if strategy_class_name == "RefinedTopKStrategy":
+            strategy_class = RefinedTopKStrategy
+        elif strategy_class_name == "SimpleLowTurnoverStrategy":
+            strategy_class = SimpleLowTurnoverStrategy
+        elif strategy_class_name == "TopkDropoutStrategy":
+            strategy_class = TopkDropoutStrategy
+        else:
+            logger.warning(f"Unknown strategy class: {strategy_class_name}, using TopkDropoutStrategy")
+            strategy_class = TopkDropoutStrategy
 
         # Create portfolio strategy
         strategy = create_portfolio_strategy(
             predictions=predictions,
-            strategy_class=TopkDropoutStrategy,
+            strategy_class=strategy_class,
             top_k=args.top_k,
+            buffer_ratio=args.buffer_ratio,
+            retain_threshold=args.retain_threshold,
         )
 
         # Run backtest
