@@ -24,84 +24,15 @@ import torch
 from qlib.contrib.data.handler import Alpha158
 from qlib.data import D
 from sklearn.manifold import TSNE
-from sqlalchemy import text
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from nq.config import DatabaseConfig, load_config
-from nq.repo.stock_repo import StockIndustryMemberRepo
+from nq.utils.industry import load_industry_map
 
 # Import structure expert model using standard package import
 from tools.qlib.train.structure_expert import GraphDataBuilder, StructureExpertGNN, StructureTrainer
-
-
-def load_industry_map(
-    db_config: DatabaseConfig, target_date: Optional[datetime] = None, schema: str = "quant"
-) -> Dict[str, int]:
-    """
-    Load industry mapping from database.
-
-    Args:
-        db_config: Database configuration.
-        target_date: Target date for industry membership.
-        schema: Database schema name.
-
-    Returns:
-        Dictionary mapping stock codes to industry IDs.
-    """
-    repo = StockIndustryMemberRepo(db_config, schema=schema)
-
-    if target_date is None:
-        target_date = datetime.now()
-
-    engine = repo._get_engine()
-    table_name = repo._get_full_table_name()
-
-    sql = f"""
-    SELECT DISTINCT ts_code, l3_code
-    FROM {table_name}
-    WHERE (out_date IS NULL OR out_date > :target_date)
-      AND in_date <= :target_date
-    ORDER BY ts_code
-    """
-
-    with engine.connect() as conn:
-        result = conn.execute(
-            text(sql),
-            {"target_date": target_date.date()},
-        )
-        rows = result.fetchall()
-
-    # Convert to mapping
-    industry_codes = sorted(set(row[1] for row in rows))
-    industry_id_map = {code: idx for idx, code in enumerate(industry_codes)}
-
-    # Create stock_code -> industry_id mapping
-    # Store multiple format variants for robust matching (Qlib may use lowercase)
-    industry_map = {}
-    for ts_code, l3_code in rows:
-        # Convert ts_code to Qlib format
-        qlib_code = convert_ts_code_to_qlib_format(ts_code)
-        industry_id = industry_id_map[l3_code]
-        # Store standard format (uppercase)
-        if qlib_code:
-            industry_map[qlib_code] = industry_id
-            # Also store lowercase variant for Qlib compatibility
-            industry_map[qlib_code.lower()] = industry_id
-        # Also store original format variants for robust matching
-        industry_map[ts_code] = industry_id
-        industry_map[ts_code.upper()] = industry_id
-        industry_map[ts_code.lower()] = industry_id
-
-    return industry_map
-
-
-# Import unified data normalization
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from nq.utils.data_normalize import normalize_stock_code as convert_ts_code_to_qlib_format
 
 
 @st.cache_data

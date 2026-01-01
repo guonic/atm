@@ -21,6 +21,7 @@
 - `dist/` - 发布包（gitignore）
 
 ## Python 代码规范
+项目使用.venv作为python的虚拟环境，请在运行代码前先激活虚拟环境。
 
 ### 目录结构
 - `python/atm/` - 主包目录

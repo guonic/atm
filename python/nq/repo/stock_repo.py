@@ -1000,4 +1000,82 @@ class StockIndustryMemberRepo(DatabaseRepo):
             result = conn.execute(text(sql), {"l3_code": l3_code})
             return [StockIndustryMember(**dict(row._mapping)) for row in result]
 
+    def get_industry_mapping(
+        self, target_date: Optional[date] = None
+    ) -> List[tuple]:
+        """
+        Get industry mapping data (ts_code, l3_code) for a specific date.
+
+        Args:
+            target_date: Target date for industry membership (default: current date).
+
+        Returns:
+            List of tuples (ts_code, l3_code) for stocks valid at target_date.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if target_date is None:
+            from datetime import date as date_type
+            target_date = date_type.today()
+
+        sql = f"""
+        SELECT DISTINCT ts_code, l3_code
+        FROM {table_name}
+        WHERE (out_date IS NULL OR out_date > :target_date)
+          AND in_date <= :target_date
+        ORDER BY ts_code
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"target_date": target_date})
+            return [(row[0], row[1]) for row in result.fetchall()]
+
+    def get_industry_label_mapping(
+        self, target_date: Optional[date] = None
+    ) -> List[tuple]:
+        """
+        Get industry label mapping data (ts_code, l3_name) for a specific date.
+
+        Args:
+            target_date: Target date for industry membership (default: current date).
+
+        Returns:
+            List of tuples (ts_code, l3_name) for stocks valid at target_date.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if target_date is None:
+            from datetime import date as date_type
+            target_date = date_type.today()
+
+        sql = f"""
+        SELECT DISTINCT ON (sim.ts_code)
+            sim.ts_code,
+            sim.l3_name
+        FROM {table_name} sim
+        WHERE sim.in_date <= :target_date
+          AND (sim.out_date IS NULL OR sim.out_date > :target_date)
+        ORDER BY sim.ts_code, sim.in_date DESC
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"target_date": target_date})
+            rows = result.fetchall()
+
+            # If no results, try without out_date filter (use latest in_date for each stock)
+            if not rows:
+                sql_latest = f"""
+                SELECT DISTINCT ON (sim.ts_code)
+                    sim.ts_code,
+                    sim.l3_name
+                FROM {table_name} sim
+                ORDER BY sim.ts_code, sim.in_date DESC
+                """
+                result = conn.execute(text(sql_latest))
+                rows = result.fetchall()
+
+            return [(row[0], row[1]) for row in rows]
+
 

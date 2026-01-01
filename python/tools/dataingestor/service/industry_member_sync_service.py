@@ -294,12 +294,16 @@ class IndustryMemberSyncService:
 
         try:
             # Fetch data from Tushare with only L1 code (always fetch all data)
-            params = {
+            records = list(self.tushare_source.fetch(api_name="index_member_all", **{
                 "l1_code": l1_code,
-                "is_new": "Y",  # Always fetch latest data
-            }
+                "is_new": "Y",  # fetch latest data
+            }))
 
-            records = list(self.tushare_source.fetch(api_name="index_member_all", **params))
+            records += list(self.tushare_source.fetch(api_name="index_member_all", **{
+                "l1_code": l1_code,
+                "is_new": "N",  # fetch all historical data
+            }))
+
             results["fetched"] = len(records)
 
             if not records:

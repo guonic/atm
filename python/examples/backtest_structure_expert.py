@@ -137,7 +137,7 @@ else:
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from nq.config import DatabaseConfig, load_config
+from nq.config import load_config
 from nq.utils.data_normalize import normalize_index_code, normalize_stock_code
 from nq.utils.industry import load_industry_label_map, load_industry_map
 from nq.utils.model import save_embeddings as save_embeddings_to_file
@@ -146,7 +146,6 @@ from nq.utils.model import save_embeddings as save_embeddings_to_file
 from tools.qlib.train.structure_expert import (
     GraphDataBuilder,
     StructureExpertGNN,
-    StructureTrainer,
     load_structure_expert_model,
 )
 
