@@ -55,12 +55,39 @@ class StructureExpertGNN(nn.Module):
         self.conv1 = GATv2Conv(n_feat, n_hidden, heads=n_heads, concat=True)
         # Second GAT layer: feature fusion
         self.conv2 = GATv2Conv(n_hidden * n_heads, n_hidden, heads=1, concat=False)
+
+        if n_feat != n_hidden:
+            self.shortcut = nn.Linear(n_feat, n_hidden)
+        else:
+            self.shortcut = nn.Identity()
+
         # Prediction layer: outputs stock scores
         self.predict = nn.Sequential(
             nn.Linear(n_hidden, 32),
             nn.LeakyReLU(),
             nn.Linear(32, 1),
         )
+
+    # def forward(
+    #     self, x: torch.Tensor, edge_index: torch.Tensor
+    # ) -> Tuple[torch.Tensor, torch.Tensor]:
+    #     """
+    #     Forward pass through the model.
+    #
+    #     Args:
+    #         x: Node features tensor of shape [num_nodes, num_features].
+    #         edge_index: Edge index tensor of shape [2, num_edges].
+    #
+    #     Returns:
+    #         Tuple of (logits, embedding):
+    #             - logits: Prediction scores of shape [num_nodes, 1].
+    #             - embedding: High-dimensional structure embedding of shape [num_nodes, n_hidden].
+    #     """
+    #     # x: [num_nodes, num_features], edge_index: [2, num_edges]
+    #     h = F.leaky_relu(self.conv1(x, edge_index))
+    #     h = self.conv2(h, edge_index)  # h is high-dimensional structure embedding
+    #     logits = self.predict(h)
+    #     return logits, h
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor
@@ -77,11 +104,27 @@ class StructureExpertGNN(nn.Module):
                 - logits: Prediction scores of shape [num_nodes, 1].
                 - embedding: High-dimensional structure embedding of shape [num_nodes, n_hidden].
         """
-        # x: [num_nodes, num_features], edge_index: [2, num_edges]
-        h = F.leaky_relu(self.conv1(x, edge_index))
-        h = self.conv2(h, edge_index)  # h is high-dimensional structure embedding
-        logits = self.predict(h)
-        return logits, h
+        # 1. Preserve the original features for residual connection
+        identity = self.shortcut(x)
+
+        # 2. First layer of GAT convolution
+        h = self.conv1(x, edge_index)
+        h = F.leaky_relu(h)
+        h = F.dropout(h, p=0.2, training=self.training)
+
+        # 3. Second layer of GAT convolution
+        h = self.conv2(h, edge_index)
+
+        # 4. 【Core Change】Introduce residual connection
+        # Add the structured feature h learned by GNN to the projected original feature identity
+        # This way, even if GNN "muddles" the feature calculation,
+        # the model still retains the characteristic individuality of the original individual stocks
+        h_final = h + identity
+
+        # 5. output
+        logits = self.predict(h_final)
+
+        return logits, h_final
 
 
 class GraphDataBuilder:
@@ -92,16 +135,16 @@ class GraphDataBuilder:
     connected by edges, enabling the GNN to capture industry relationships.
 
     Attributes:
-        industry_map: Dictionary mapping stock codes to industry IDs.
+        industry_map: Dictionary mapping stock codes to industry codes (L3 level).
     """
 
-    def __init__(self, industry_map: Dict[str, int]) -> None:
+    def __init__(self, industry_map: Dict[str, str]) -> None:
         """
         Initialize the GraphDataBuilder.
 
         Args:
-            industry_map: Dictionary mapping stock codes to industry IDs.
-                Format: {stock_code: industry_id}
+            industry_map: Dictionary mapping stock codes to industry codes (L3 level).
+                Format: {stock_code: l3_code}
         """
         self.industry_map = industry_map
 
@@ -157,18 +200,17 @@ class GraphDataBuilder:
 
         # Build edges: connect stocks in the same industry pairwise
         edge_index = []
-        # Pre-optimization: group nodes by industry
-        ind_to_nodes: Dict[int, List[int]] = {}
+        # Pre-optimization: group nodes by industry code (L3 level)
+        ind_to_nodes: Dict[str, List[int]] = {}
         for idx, symbol in enumerate(stock_list):
-            ind = self.industry_map.get(symbol, -1)
-            # If stock is not in industry_map, assign a default industry ID (-1)
-            # Stocks with -1 will not be connected to any other stocks
+            ind_code = self.industry_map.get(symbol)
+            # If stock is not in industry_map, skip it (won't have edges)
             # This allows the model to process all stocks, even if they don't have industry mapping
-            if ind != -1:
-                if ind not in ind_to_nodes:
-                    ind_to_nodes[ind] = []
-                ind_to_nodes[ind].append(idx)
-            # Note: Stocks with ind == -1 are not added to ind_to_nodes,
+            if ind_code:
+                if ind_code not in ind_to_nodes:
+                    ind_to_nodes[ind_code] = []
+                ind_to_nodes[ind_code].append(idx)
+            # Note: Stocks without industry mapping are not added to ind_to_nodes,
             # so they won't have edges, but they will still be included in the graph
 
         for nodes in ind_to_nodes.values():

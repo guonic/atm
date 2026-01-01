@@ -803,6 +803,30 @@ class StockIndustryClassifyRepo(DatabaseRepo):
             logger.error(f"Failed to delete classifications for src={src}: {e}")
             return False
 
+    def get_l1_index_codes(self, src: str = "SW2021") -> List[str]:
+        """
+        Get all L1 level index codes.
+
+        Args:
+            src: Source version (default: SW2021).
+
+        Returns:
+            List of L1 index codes.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        sql = f"""
+        SELECT DISTINCT index_code
+        FROM {table_name}
+        WHERE level = 'L1' AND src = :src
+        ORDER BY index_code
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"src": src})
+            return [row[0] for row in result]
+
 
 # =============================================
 # Stock Industry Member Repository
@@ -897,17 +921,24 @@ class StockIndustryMemberRepo(DatabaseRepo):
             logger.info(f"Ensured table {table_name} exists.")
         except Exception as e:
             logger.warning(f"Failed to create industry member table {table_name} (may already exist): {e}")
-            if not self.table_exists():
+            # Try to verify table exists by checking if we can query it
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text(f"SELECT 1 FROM {table_name} LIMIT 1"))
+            except Exception:
                 raise RepoError(f"Table {table_name} does not exist and could not be created.") from e
 
     def save_model(self, member: StockIndustryMember) -> bool:
         """Save a StockIndustryMember model."""
         data = member.model_dump(exclude_none=True)
+        # Explicitly include out_date even if None (to set NULL in database)
+        if "out_date" not in data:
+            data["out_date"] = member.out_date
         if "update_time" in data and isinstance(data["update_time"], datetime):
             data["update_time"] = data["update_time"].isoformat()
         if "in_date" in data and isinstance(data["in_date"], date):
             data["in_date"] = data["in_date"].isoformat()
-        if "out_date" in data and isinstance(data["out_date"], date):
+        if "out_date" in data and data["out_date"] is not None and isinstance(data["out_date"], date):
             data["out_date"] = data["out_date"].isoformat()
         return self.save(data)
 
@@ -916,12 +947,20 @@ class StockIndustryMemberRepo(DatabaseRepo):
         data_list = []
         for member in members:
             data = member.model_dump(exclude_none=True)
+            # Explicitly include out_date even if None (to set NULL in database)
+            # This is important because out_date=None means the stock is still in the industry
+            # Always include out_date, even if it's None
+            data["out_date"] = member.out_date
+            
+            # Convert datetime/date to string format
             if "update_time" in data and isinstance(data["update_time"], datetime):
                 data["update_time"] = data["update_time"].isoformat()
             if "in_date" in data and isinstance(data["in_date"], date):
                 data["in_date"] = data["in_date"].isoformat()
-            if "out_date" in data and isinstance(data["out_date"], date):
+            # Only convert out_date to string if it's not None
+            if "out_date" in data and data["out_date"] is not None and isinstance(data["out_date"], date):
                 data["out_date"] = data["out_date"].isoformat()
+            # If out_date is None, keep it as None (will be converted to NULL in database)
             data_list.append(data)
         return self.save_batch(data_list)
 
@@ -960,5 +999,83 @@ class StockIndustryMemberRepo(DatabaseRepo):
         with engine.connect() as conn:
             result = conn.execute(text(sql), {"l3_code": l3_code})
             return [StockIndustryMember(**dict(row._mapping)) for row in result]
+
+    def get_industry_mapping(
+        self, target_date: Optional[date] = None
+    ) -> List[tuple]:
+        """
+        Get industry mapping data (ts_code, l3_code) for a specific date.
+
+        Args:
+            target_date: Target date for industry membership (default: current date).
+
+        Returns:
+            List of tuples (ts_code, l3_code) for stocks valid at target_date.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if target_date is None:
+            from datetime import date as date_type
+            target_date = date_type.today()
+
+        sql = f"""
+        SELECT DISTINCT ts_code, l3_code
+        FROM {table_name}
+        WHERE (out_date IS NULL OR out_date > :target_date)
+          AND in_date <= :target_date
+        ORDER BY ts_code
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"target_date": target_date})
+            return [(row[0], row[1]) for row in result.fetchall()]
+
+    def get_industry_label_mapping(
+        self, target_date: Optional[date] = None
+    ) -> List[tuple]:
+        """
+        Get industry label mapping data (ts_code, l3_name) for a specific date.
+
+        Args:
+            target_date: Target date for industry membership (default: current date).
+
+        Returns:
+            List of tuples (ts_code, l3_name) for stocks valid at target_date.
+        """
+        engine = self._get_engine()
+        table_name = self._get_full_table_name()
+
+        if target_date is None:
+            from datetime import date as date_type
+            target_date = date_type.today()
+
+        sql = f"""
+        SELECT DISTINCT ON (sim.ts_code)
+            sim.ts_code,
+            sim.l3_name
+        FROM {table_name} sim
+        WHERE sim.in_date <= :target_date
+          AND (sim.out_date IS NULL OR sim.out_date > :target_date)
+        ORDER BY sim.ts_code, sim.in_date DESC
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(sql), {"target_date": target_date})
+            rows = result.fetchall()
+
+            # If no results, try without out_date filter (use latest in_date for each stock)
+            if not rows:
+                sql_latest = f"""
+                SELECT DISTINCT ON (sim.ts_code)
+                    sim.ts_code,
+                    sim.l3_name
+                FROM {table_name} sim
+                ORDER BY sim.ts_code, sim.in_date DESC
+                """
+                result = conn.execute(text(sql_latest))
+                rows = result.fetchall()
+
+            return [(row[0], row[1]) for row in rows]
 
 

@@ -35,7 +35,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Sync all stocks' industry members
+  # Sync all L1 industries from stock_industry_classify table
+  # (Fetches all L1 index_codes and syncs each one, only L1_code will be set)
   python sync_industry_member.py
 
   # Sync by L3 industry code
@@ -46,9 +47,6 @@ Examples:
 
   # Sync by L1 industry code
   python sync_industry_member.py --l1-code 801050.SI
-
-  # Sync all historical data (not just latest)
-  python sync_industry_member.py --is-new N
 
   # Use database state storage
   python sync_industry_member.py --use-db-state
@@ -69,13 +67,6 @@ Examples:
         "--l3-code",
         type=str,
         help="L3 industry code (e.g., 850531.SI)",
-    )
-    parser.add_argument(
-        "--is-new",
-        type=str,
-        default="Y",
-        choices=["Y", "N"],
-        help="Whether to sync only latest data (Y) or all data (N, default: Y)",
     )
     parser.add_argument(
         "--batch-size",
@@ -168,22 +159,16 @@ Examples:
                 cleanup_results = service.cleanup_by_date_range(start_date, end_date)
                 logger.info(f"Cleanup completed: {cleanup_results}")
                 return
-            # Sync based on parameters
-            if args.l1_code or args.l2_code or args.l3_code:
-                # Sync by industry code
-                results = service.sync_by_industry(
-                    l1_code=args.l1_code,
-                    l2_code=args.l2_code,
-                    l3_code=args.l3_code,
-                    batch_size=args.batch_size,
-                    is_new=args.is_new,
-                )
-            else:
-                # Sync all stocks
-                results = service.sync_all_stocks(
-                    batch_size=args.batch_size,
-                    is_new=args.is_new,
-                )
+            # Sync industry members
+            # If no specific industry codes provided, sync_by_industry will automatically
+            # fetch all L1 index_codes from stock_industry_classify table and sync each one
+            # Note: This always performs a full refresh (deletes existing data, then inserts new data)
+            results = service.sync_by_industry(
+                l1_code=args.l1_code,
+                l2_code=args.l2_code,
+                l3_code=args.l3_code,
+                batch_size=args.batch_size,
+            )
 
             # Print summary
             logger.info("=" * 80)
@@ -195,7 +180,6 @@ Examples:
                 logger.info(f"L2 industry code: {args.l2_code}")
             if args.l3_code:
                 logger.info(f"L3 industry code: {args.l3_code}")
-            logger.info(f"Is new: {args.is_new}")
             logger.info(f"Total records fetched: {results.get('total_fetched', results.get('fetched', 0))}")
             logger.info(f"Total records saved: {results.get('total_saved', results.get('saved', 0))}")
             logger.info(f"Total errors: {results.get('errors', 0)}")

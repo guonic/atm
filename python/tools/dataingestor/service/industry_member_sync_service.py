@@ -27,10 +27,9 @@ from nq.repo import (
     BaseTaskLock,
     DatabaseStateRepo,
     DatabaseTaskLock,
-    FileStateRepo,
     FileTaskLock,
-    IngestionState,
     StockBasicRepo,
+    StockIndustryClassifyRepo,
     StockIndustryMemberRepo,
     TaskLockError,
 )
@@ -71,6 +70,7 @@ class IndustryMemberSyncService:
         # Initialize repositories
         self.member_repo = StockIndustryMemberRepo(db_config)
         self.stock_repo = StockBasicRepo(db_config)
+        self.classify_repo = StockIndustryClassifyRepo(db_config)
 
         # Initialize Tushare source
         self.tushare_source = TushareSource(
@@ -120,73 +120,28 @@ class IndustryMemberSyncService:
             self._initialized = False
             logger.info("Industry member sync service closed")
 
-    def sync_all_stocks(
-        self,
-        batch_size: int = 100,
-        is_new: str = "Y",
-    ) -> Dict[str, int]:
+    def _cleanup_all(self) -> int:
         """
-        Synchronize industry members for all stocks.
-
-        Args:
-            batch_size: Batch size for saving.
-            is_new: Whether to sync only latest data (Y) or all data (N).
+        Clean up all existing industry member data.
 
         Returns:
-            Dictionary with sync results.
+            Number of records deleted.
         """
-        task_name = "industry_member_all"
-        lock_key = f"sync_{task_name}"
-
-        # Acquire task lock
         try:
-            if not self.task_lock.acquire(lock_key, timeout=3600):
-                raise TaskLockError(f"Failed to acquire lock for {lock_key}")
-        except TaskLockError as e:
-            logger.error(f"Task lock error: {e}")
-            raise
+            engine = self.member_repo._get_engine()
+            table_name = self.member_repo._get_full_table_name()
 
-        try:
-            results = {
-                "total_fetched": 0,
-                "total_saved": 0,
-                "errors": 0,
-            }
+            from sqlalchemy import text
 
-            # Get all stocks
-            stocks = self.stock_repo.get_all()
-            logger.info(f"Syncing industry members for {len(stocks)} stocks...")
+            delete_sql = f"DELETE FROM {table_name}"
 
-            # Sync by stock (to avoid API limits)
-            for i, stock in enumerate(stocks, 1):
-                try:
-                    stock_results = self._sync_stock(stock.ts_code, is_new, batch_size)
-                    results["total_fetched"] += stock_results["fetched"]
-                    results["total_saved"] += stock_results["saved"]
-                    results["errors"] += stock_results["errors"]
+            with engine.begin() as conn:
+                result = conn.execute(text(delete_sql))
+                return result.rowcount
 
-                    # Rate limiting: sleep between requests
-                    if i < len(stocks):  # Don't sleep after last stock
-                        time.sleep(TUSHARE_REQUEST_INTERVAL)
-
-                    if i % 100 == 0:
-                        logger.info(f"Progress: {i}/{len(stocks)} stocks processed")
-
-                except Exception as e:
-                    logger.error(f"Failed to sync stock {stock.ts_code}: {e}")
-                    results["errors"] += 1
-                    # Sleep longer on error to avoid hitting rate limit
-                    time.sleep(TUSHARE_REQUEST_INTERVAL * 2)
-
-            logger.info(f"Sync completed: {results}")
-            return results
-
-        finally:
-            # Release task lock
-            try:
-                self.task_lock.release(lock_key)
-            except Exception as e:
-                logger.warning(f"Error releasing lock: {e}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup all data: {e}")
+            return 0
 
     def sync_by_industry(
         self,
@@ -194,17 +149,25 @@ class IndustryMemberSyncService:
         l2_code: Optional[str] = None,
         l3_code: Optional[str] = None,
         batch_size: int = 100,
-        is_new: str = "Y",
+        src: str = "SW2021",
     ) -> Dict[str, int]:
         """
         Synchronize industry members by industry code.
 
+        This method performs a full refresh: it first deletes existing data for the specified
+        industry codes, then inserts new data from Tushare API.
+
+        If no specific industry code is provided, this method will:
+        1. Get all L1 index codes from stock_industry_classify table
+        2. Iterate through each L1 code and fetch index_member_all data
+        3. Save full data including L1, L2, and L3 codes and names
+
         Args:
-            l1_code: L1 industry code.
-            l2_code: L2 industry code.
-            l3_code: L3 industry code.
+            l1_code: L1 industry code. If None, will sync all L1 codes from classify table.
+            l2_code: L2 industry code (not used when syncing by L1).
+            l3_code: L3 industry code (not used when syncing by L1).
             batch_size: Batch size for saving.
-            is_new: Whether to sync only latest data (Y) or all data (N).
+            src: Source version for industry classify (default: SW2021).
 
         Returns:
             Dictionary with sync results.
@@ -223,8 +186,49 @@ class IndustryMemberSyncService:
         try:
             results = {"fetched": 0, "saved": 0, "errors": 0}
 
-            # Build params
-            params = {"is_new": is_new}
+            # If no specific l1_code provided, get all L1 codes from classify table
+            if l1_code is None and l2_code is None and l3_code is None:
+                logger.info("No specific industry code provided, fetching all L1 codes from classify table...")
+                l1_codes = self.classify_repo.get_l1_index_codes(src=src)
+                logger.info(f"Found {len(l1_codes)} L1 industry codes to sync")
+
+                # Clean up all existing data before syncing
+                logger.info("Cleaning up all existing industry member data before full refresh...")
+                deleted_count = self._cleanup_by_l1_codes(l1_codes)
+                logger.info(f"Deleted {deleted_count} existing records")
+
+                # Iterate through each L1 code
+                for i, code in enumerate(l1_codes, 1):
+                    try:
+                        logger.info(f"Syncing L1 code {code} ({i}/{len(l1_codes)})...")
+                        code_results = self._sync_by_l1_code(code, batch_size)
+                        results["fetched"] += code_results["fetched"]
+                        results["saved"] += code_results["saved"]
+                        results["errors"] += code_results["errors"]
+
+                        # Rate limiting: sleep between requests
+                        if i < len(l1_codes):
+                            time.sleep(TUSHARE_REQUEST_INTERVAL)
+
+                        if i % 10 == 0:
+                            logger.info(f"Progress: {i}/{len(l1_codes)} L1 codes processed")
+
+                    except Exception as e:
+                        logger.error(f"Failed to sync L1 code {code}: {e}")
+                        results["errors"] += 1
+                        time.sleep(TUSHARE_REQUEST_INTERVAL * 2)
+
+                logger.info(f"Sync completed: {results}")
+                return results
+
+            # Sync with specific industry codes
+            # Clean up existing data for the specified industry codes first
+            logger.info("Cleaning up existing data for specified industry codes...")
+            deleted_count = self._cleanup_by_industry_codes(l1_code, l2_code, l3_code)
+            logger.info(f"Deleted {deleted_count} existing records")
+
+            # Build params (fetch latest snapshot data)
+            params = {"is_new": "Y"}  # Fetch latest snapshot data
             if l1_code:
                 params["l1_code"] = l1_code
             if l2_code:
@@ -244,7 +248,7 @@ class IndustryMemberSyncService:
             models = []
             for record in records:
                 try:
-                    model = self._record_to_model(record)
+                    model = self._record_to_model(record, l1_only=False)
                     if model:
                         models.append(model)
                 except Exception as e:
@@ -271,13 +275,162 @@ class IndustryMemberSyncService:
             except Exception as e:
                 logger.warning(f"Error releasing lock: {e}")
 
-    def _sync_stock(self, ts_code: str, is_new: str, batch_size: int) -> Dict[str, int]:
+    def _sync_by_l1_code(
+        self,
+        l1_code: str,
+        batch_size: int,
+    ) -> Dict[str, int]:
+        """
+        Synchronize industry members for a single L1 code.
+
+        Args:
+            l1_code: L1 industry code.
+            batch_size: Batch size for saving.
+
+        Returns:
+            Dictionary with sync results.
+        """
+        results = {"fetched": 0, "saved": 0, "errors": 0}
+
+        try:
+            # Fetch data from Tushare with only L1 code (always fetch all data)
+            records = list(self.tushare_source.fetch(api_name="index_member_all", **{
+                "l1_code": l1_code,
+                "is_new": "Y",  # fetch latest data
+            }))
+
+            records += list(self.tushare_source.fetch(api_name="index_member_all", **{
+                "l1_code": l1_code,
+                "is_new": "N",  # fetch all historical data
+            }))
+
+            results["fetched"] = len(records)
+
+            if not records:
+                return results
+
+            # Convert to models (save full data including L2 and L3)
+            models = []
+            for record in records:
+                try:
+                    model = self._record_to_model(record, l1_only=False)
+                    if model:
+                        models.append(model)
+                except Exception as e:
+                    logger.warning(f"Failed to create model for record {record}: {e}")
+                    results["errors"] += 1
+
+            # Save in batches
+            if models:
+                total_saved = 0
+                for i in range(0, len(models), batch_size):
+                    batch = models[i : i + batch_size]
+                    saved = self.member_repo.save_batch_models(batch)
+                    total_saved += saved
+                results["saved"] = total_saved
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error syncing L1 code {l1_code}: {e}")
+            results["errors"] += 1
+            return results
+
+    def _cleanup_by_l1_codes(self, l1_codes: List[str]) -> int:
+        """
+        Clean up existing data for specified L1 codes.
+
+        Args:
+            l1_codes: List of L1 industry codes.
+
+        Returns:
+            Number of records deleted.
+        """
+        if not l1_codes:
+            return 0
+
+        try:
+            engine = self.member_repo._get_engine()
+            table_name = self.member_repo._get_full_table_name()
+
+            from sqlalchemy import text
+
+            # Delete records where l1_code matches any of the provided codes
+            # Use parameterized query to avoid SQL injection
+            placeholders = ", ".join([f":code_{i}" for i in range(len(l1_codes))])
+            params = {f"code_{i}": code for i, code in enumerate(l1_codes)}
+
+            delete_sql = f"""
+            DELETE FROM {table_name}
+            WHERE l1_code IN ({placeholders})
+            """
+
+            with engine.begin() as conn:
+                result = conn.execute(text(delete_sql), params)
+                return result.rowcount
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup by L1 codes: {e}")
+            return 0
+
+    def _cleanup_by_industry_codes(
+        self,
+        l1_code: Optional[str] = None,
+        l2_code: Optional[str] = None,
+        l3_code: Optional[str] = None,
+    ) -> int:
+        """
+        Clean up existing data for specified industry codes.
+
+        Args:
+            l1_code: L1 industry code.
+            l2_code: L2 industry code.
+            l3_code: L3 industry code.
+
+        Returns:
+            Number of records deleted.
+        """
+        try:
+            engine = self.member_repo._get_engine()
+            table_name = self.member_repo._get_full_table_name()
+
+            from sqlalchemy import text
+
+            conditions = []
+            params = {}
+
+            if l1_code:
+                conditions.append("l1_code = :l1_code")
+                params["l1_code"] = l1_code
+            if l2_code:
+                conditions.append("l2_code = :l2_code")
+                params["l2_code"] = l2_code
+            if l3_code:
+                conditions.append("l3_code = :l3_code")
+                params["l3_code"] = l3_code
+
+            if not conditions:
+                # If no specific codes provided, delete all (should not happen in normal flow)
+                logger.warning("No industry codes specified for cleanup, skipping")
+                return 0
+
+            where_clause = " AND ".join(conditions)
+            delete_sql = f"DELETE FROM {table_name} WHERE {where_clause}"
+
+            with engine.begin() as conn:
+                result = conn.execute(text(delete_sql), params)
+                return result.rowcount
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup by industry codes: {e}")
+            return 0
+
+    def _sync_stock(self, ts_code: str, batch_size: int) -> Dict[str, int]:
         """
         Synchronize industry members for a single stock with retry mechanism.
 
         Args:
             ts_code: Stock code.
-            is_new: Whether to sync only latest data (Y) or all data (N).
             batch_size: Batch size for saving.
 
         Returns:
@@ -288,10 +441,10 @@ class IndustryMemberSyncService:
         # Retry mechanism for rate limit errors
         for retry in range(TUSHARE_MAX_RETRIES):
             try:
-                # Fetch data from Tushare
+                # Fetch data from Tushare (always fetch all data)
                 params = {
                     "ts_code": ts_code,
-                    "is_new": is_new,
+                    "is_new": "N",  # Always fetch all historical data
                 }
 
                 records = list(self.tushare_source.fetch(api_name="index_member_all", **params))
@@ -347,12 +500,15 @@ class IndustryMemberSyncService:
 
         return results
 
-    def _record_to_model(self, record: Dict) -> Optional[StockIndustryMember]:
+    def _record_to_model(
+        self, record: Dict, l1_only: bool = False
+    ) -> Optional[StockIndustryMember]:
         """
         Convert API record to model.
 
         Args:
             record: API record dictionary.
+            l1_only: If True, only set L1_code and leave L2/L3 empty (default: False).
 
         Returns:
             StockIndustryMember model or None if conversion fails.
@@ -360,34 +516,54 @@ class IndustryMemberSyncService:
         try:
             # Parse dates
             in_date_str = record.get("in_date", "")
-            out_date_str = record.get("out_date", "")
+            out_date_str = record.get("out_date")  # Keep None if not present, don't convert to empty string
 
             in_date = None
             if in_date_str:
                 in_date = pd.to_datetime(in_date_str, format="%Y%m%d").date()
 
             out_date = None
-            if out_date_str:
+            # Handle both None and empty string cases
+            if out_date_str and str(out_date_str).strip():
                 out_date = pd.to_datetime(out_date_str, format="%Y%m%d").date()
+            # If out_date_str is None or empty, out_date remains None (which is correct)
 
             if not in_date:
                 logger.warning(f"Invalid in_date in record: {record}")
                 return None
 
-            model = StockIndustryMember(
-                ts_code=record.get("ts_code", ""),
-                l1_code=record.get("l1_code", ""),
-                l1_name=record.get("l1_name", ""),
-                l2_code=record.get("l2_code", ""),
-                l2_name=record.get("l2_name", ""),
-                l3_code=record.get("l3_code", ""),
-                l3_name=record.get("l3_name", ""),
-                stock_name=record.get("name"),
-                in_date=in_date,
-                out_date=out_date,
-                is_new=record.get("is_new", "Y"),
-                update_time=datetime.now(),
-            )
+            if l1_only:
+                # Only set L1_code, leave L2 and L3 empty
+                model = StockIndustryMember(
+                    ts_code=record.get("ts_code", ""),
+                    l1_code=record.get("l1_code", ""),
+                    l1_name=record.get("l1_name", ""),
+                    l2_code="",  # Empty for L1-only sync
+                    l2_name="",  # Empty for L1-only sync
+                    l3_code="",  # Empty for L1-only sync
+                    l3_name="",  # Empty for L1-only sync
+                    stock_name=record.get("name"),
+                    in_date=in_date,
+                    out_date=out_date,
+                    is_new=record.get("is_new", "Y"),
+                    update_time=datetime.now(),
+                )
+            else:
+                # Full model with all levels
+                model = StockIndustryMember(
+                    ts_code=record.get("ts_code", ""),
+                    l1_code=record.get("l1_code", ""),
+                    l1_name=record.get("l1_name", ""),
+                    l2_code=record.get("l2_code", ""),
+                    l2_name=record.get("l2_name", ""),
+                    l3_code=record.get("l3_code", ""),
+                    l3_name=record.get("l3_name", ""),
+                    stock_name=record.get("name"),
+                    in_date=in_date,
+                    out_date=out_date,
+                    is_new=record.get("is_new", "Y"),
+                    update_time=datetime.now(),
+                )
             return model
 
         except Exception as e:
@@ -485,4 +661,5 @@ class IndustryMemberSyncService:
             logger.error(f"Failed to cleanup by date range: {e}")
             results["errors"] += 1
             return results
+
 

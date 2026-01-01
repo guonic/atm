@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行业分类管理控制台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .stats-card {
+            transition: transform 0.2s;
+        }
+        .stats-card:hover {
+            transform: translateY(-5px);
+        }
+        .table-hover tbody tr:hover {
+            cursor: pointer;
+        }
+        .search-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+        }
+        .industry-badge {
+            font-size: 0.85rem;
+            padding: 0.4rem 0.8rem;
+        }
+        .loading {
+            display: none;
+        }
+        .loading.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="bi bi-diagram-3"></i> 行业分类管理控制台
+            </span>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Statistics Cards -->
+        <div class="row mb-4" id="stats-section">
+            <div class="col-md-3">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-muted">总记录数</h5>
+                        <h2 class="mb-0" id="stat-total">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-muted">当前股票数</h5>
+                        <h2 class="mb-0" id="stat-current">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-muted">行业数量</h5>
+                        <h2 class="mb-0" id="stat-industries">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-muted">数据日期范围</h5>
+                        <h6 class="mb-0" id="stat-dates">-</h6>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Section -->
+        <div class="search-section">
+            <h3><i class="bi bi-search"></i> 搜索股票</h3>
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <input type="text" class="form-control form-control-lg" id="search-input" 
+                           placeholder="输入股票代码或名称 (如: 000001 或 平安银行)">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-lg" id="current-only">
+                        <option value="true">仅当前有效</option>
+                        <option value="false">包含历史</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-light btn-lg w-100" onclick="searchStocks()">
+                        <i class="bi bi-search"></i> 搜索
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" id="main-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="search-tab" data-bs-toggle="tab" 
+                        data-bs-target="#search-panel" type="button" role="tab">
+                    <i class="bi bi-list-ul"></i> 搜索结果
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="industries-tab" data-bs-toggle="tab" 
+                        data-bs-target="#industries-panel" type="button" role="tab">
+                    <i class="bi bi-diagram-3"></i> 行业列表
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="detail-tab" data-bs-toggle="tab" 
+                        data-bs-target="#detail-panel" type="button" role="tab">
+                    <i class="bi bi-info-circle"></i> 股票详情
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Panels -->
+        <div class="tab-content" id="main-tab-content">
+            <!-- Search Results Panel -->
+            <div class="tab-pane fade show active" id="search-panel" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">搜索结果</h5>
+                            <div id="search-pagination"></div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="search-table">
+                                <thead>
+                                    <tr>
+                                        <th>股票代码</th>
+                                        <th>股票名称</th>
+                                        <th>一级行业</th>
+                                        <th>二级行业</th>
+                                        <th>三级行业</th>
+                                        <th>生效日期</th>
+                                        <th>失效日期</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="search-tbody">
+                                    <tr>
+                                        <td colspan="7" class="text-center text-muted">
+                                            请输入搜索条件并点击搜索
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Industries Panel -->
+            <div class="tab-pane fade" id="industries-panel" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <select class="form-select" id="industry-level" onchange="loadIndustries()">
+                                    <option value="l1">一级行业</option>
+                                    <option value="l2">二级行业</option>
+                                    <option value="l3" selected>三级行业</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <select class="form-select" id="industry-current-only" onchange="loadIndustries()">
+                                    <option value="true" selected>仅当前有效</option>
+                                    <option value="false">包含历史</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-primary w-100" onclick="loadIndustries()">
+                                    <i class="bi bi-arrow-clockwise"></i> 刷新
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="industries-table">
+                                <thead>
+                                    <tr>
+                                        <th>行业代码</th>
+                                        <th>行业名称</th>
+                                        <th>股票数量</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="industries-tbody">
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">
+                                            <div class="spinner-border spinner-border-sm" role="status">
+                                                <span class="visually-hidden">加载中...</span>
+                                            </div>
+                                            正在加载...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detail Panel -->
+            <div class="tab-pane fade" id="detail-panel" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <div id="detail-content">
+                            <p class="text-muted text-center">请从搜索结果中选择一个股票查看详情</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑行业分类</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-form">
+                        <input type="hidden" id="edit-ts-code">
+                        <div class="mb-3">
+                            <label class="form-label">股票代码</label>
+                            <input type="text" class="form-control" id="edit-ts-code-display" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">股票名称</label>
+                            <input type="text" class="form-control" id="edit-stock-name" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">三级行业代码</label>
+                            <input type="text" class="form-control" id="edit-l3-code" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">三级行业名称</label>
+                            <input type="text" class="form-control" id="edit-l3-name" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label class="form-label">生效日期</label>
+                                <input type="date" class="form-control" id="edit-in-date" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">失效日期 (可选)</label>
+                                <input type="date" class="form-control" id="edit-out-date">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEdit()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentPage = 1;
+        let currentSearchQuery = '';
+
+        // Load statistics on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+            loadIndustries();
+        });
+
+        // Load statistics
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                
+                document.getElementById('stat-total').textContent = data.total_records.toLocaleString();
+                document.getElementById('stat-current').textContent = data.current_stocks.toLocaleString();
+                document.getElementById('stat-industries').textContent = data.unique_industries.toLocaleString();
+                
+                if (data.date_range.min && data.date_range.max) {
+                    document.getElementById('stat-dates').textContent = 
+                        `${data.date_range.min} 至 ${data.date_range.max}`;
+                } else {
+                    document.getElementById('stat-dates').textContent = '无数据';
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Search stocks
+        async function searchStocks(page = 1) {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) {
+                alert('请输入搜索关键词');
+                return;
+            }
+
+            currentSearchQuery = query;
+            currentPage = page;
+
+            const currentOnly = document.getElementById('current-only').value;
+            const tbody = document.getElementById('search-tbody');
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner-border spinner-border-sm"></div> 搜索中...</td></tr>';
+
+            try {
+                const url = `/api/search?q=${encodeURIComponent(query)}&page=${page}&per_page=50&current_only=${currentOnly}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.error) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">${data.error}</td></tr>`;
+                    return;
+                }
+
+                if (data.stocks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">未找到匹配的股票</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.stocks.map(stock => `
+                    <tr onclick="showStockDetail('${stock.ts_code}')">
+                        <td><strong>${stock.ts_code}</strong></td>
+                        <td>${stock.stock_name || '-'}</td>
+                        <td><span class="badge bg-primary industry-badge">${stock.l1_name}</span></td>
+                        <td><span class="badge bg-info industry-badge">${stock.l2_name}</span></td>
+                        <td><span class="badge bg-success industry-badge">${stock.l3_name}</span></td>
+                        <td>${stock.in_date || '-'}</td>
+                        <td>${stock.out_date || '<span class="text-success">当前有效</span>'}</td>
+                    </tr>
+                `).join('');
+
+                // Update pagination
+                updatePagination(data.page, data.total_pages, data.total);
+            } catch (error) {
+                console.error('Error searching stocks:', error);
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">搜索失败: ' + error.message + '</td></tr>';
+            }
+        }
+
+        // Update pagination
+        function updatePagination(currentPage, totalPages, total) {
+            const paginationDiv = document.getElementById('search-pagination');
+            if (totalPages <= 1) {
+                paginationDiv.innerHTML = `<small class="text-muted">共 ${total} 条记录</small>`;
+                return;
+            }
+
+            let html = `<nav><ul class="pagination pagination-sm mb-0">`;
+            
+            // Previous button
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">`;
+            html += `<a class="page-link" href="#" onclick="searchStocks(${currentPage - 1}); return false;">上一页</a></li>`;
+            
+            // Page numbers
+            for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
+                html += `<li class="page-item ${i === currentPage ? 'active' : ''}">`;
+                html += `<a class="page-link" href="#" onclick="searchStocks(${i}); return false;">${i}</a></li>`;
+            }
+            
+            // Next button
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">`;
+            html += `<a class="page-link" href="#" onclick="searchStocks(${currentPage + 1}); return false;">下一页</a></li>`;
+            
+            html += `</ul></nav>`;
+            html += `<small class="text-muted ms-2">共 ${total} 条记录，第 ${currentPage}/${totalPages} 页</small>`;
+            
+            paginationDiv.innerHTML = html;
+        }
+
+        // Load industries
+        async function loadIndustries() {
+            const level = document.getElementById('industry-level').value;
+            const currentOnly = document.getElementById('industry-current-only').value;
+            const tbody = document.getElementById('industries-tbody');
+            
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm"></div> 加载中...</td></tr>';
+
+            try {
+                const url = `/api/industries?level=${level}&current_only=${currentOnly}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.error) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">${data.error}</td></tr>`;
+                    return;
+                }
+
+                if (data.industries.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">未找到行业数据</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.industries.map(industry => `
+                    <tr>
+                        <td><code>${industry.code}</code></td>
+                        <td><strong>${industry.name}</strong></td>
+                        <td><span class="badge bg-secondary">${industry.stock_count}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" 
+                                    onclick="showIndustryStocks('${industry.code}', '${level}')">
+                                <i class="bi bi-list-ul"></i> 查看股票
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading industries:', error);
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">加载失败: ' + error.message + '</td></tr>';
+            }
+        }
+
+        // Show industry stocks
+        async function showIndustryStocks(industryCode, level) {
+            const currentOnly = document.getElementById('industry-current-only').value;
+            
+            try {
+                const url = `/api/industry/${industryCode}/stocks?level=${level}&current_only=${currentOnly}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('错误: ' + data.error);
+                    return;
+                }
+
+                // Show in a modal or switch to search tab
+                const modal = new bootstrap.Modal(document.getElementById('industryStocksModal') || createIndustryStocksModal());
+                document.getElementById('industry-stocks-content').innerHTML = `
+                    <h5>${data.industry_code} - 股票列表 (${data.stocks.length} 只)</h5>
+                    <div class="table-responsive mt-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>股票代码</th>
+                                    <th>股票名称</th>
+                                    <th>三级行业</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.stocks.map(stock => `
+                                    <tr>
+                                        <td>${stock.ts_code}</td>
+                                        <td>${stock.stock_name || '-'}</td>
+                                        <td>${stock.l3_name}</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary" 
+                                                    onclick="showStockDetail('${stock.ts_code}')">
+                                                查看详情
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                modal.show();
+            } catch (error) {
+                console.error('Error loading industry stocks:', error);
+                alert('加载失败: ' + error.message);
+            }
+        }
+
+        // Create industry stocks modal
+        function createIndustryStocksModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal fade';
+            modal.id = 'industryStocksModal';
+            modal.innerHTML = `
+                <div class="modal-dialog modal-xl">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">行业股票列表</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="industry-stocks-content"></div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            return modal;
+        }
+
+        // Show stock detail
+        async function showStockDetail(tsCode) {
+            // Switch to detail tab
+            const detailTab = document.getElementById('detail-tab');
+            const bsTab = new bootstrap.Tab(detailTab);
+            bsTab.show();
+
+            const content = document.getElementById('detail-content');
+            content.innerHTML = '<div class="text-center"><div class="spinner-border"></div> 加载中...</div>';
+
+            try {
+                const response = await fetch(`/api/stock/${tsCode}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    content.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+
+                content.innerHTML = `
+                    <h4>${data.ts_code} - 行业分类历史</h4>
+                    <div class="table-responsive mt-3">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>生效日期</th>
+                                    <th>失效日期</th>
+                                    <th>一级行业</th>
+                                    <th>二级行业</th>
+                                    <th>三级行业</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.history.map(record => `
+                                    <tr>
+                                        <td>${record.in_date || '-'}</td>
+                                        <td>${record.out_date || '<span class="text-success">当前有效</span>'}</td>
+                                        <td><span class="badge bg-primary">${record.l1_name}</span></td>
+                                        <td><span class="badge bg-info">${record.l2_name}</span></td>
+                                        <td><span class="badge bg-success">${record.l3_name}</span></td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary" 
+                                                    onclick="editStock('${record.ts_code}', '${record.l3_code}', '${record.l3_name}', '${record.in_date || ''}', '${record.out_date || ''}', '${record.stock_name || ''}')">
+                                                <i class="bi bi-pencil"></i> 编辑
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading stock detail:', error);
+                content.innerHTML = `<div class="alert alert-danger">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // Edit stock
+        function editStock(tsCode, l3Code, l3Name, inDate, outDate, stockName) {
+            document.getElementById('edit-ts-code').value = tsCode;
+            document.getElementById('edit-ts-code-display').value = tsCode;
+            document.getElementById('edit-stock-name').value = stockName || '';
+            document.getElementById('edit-l3-code').value = l3Code;
+            document.getElementById('edit-l3-name').value = l3Name;
+            document.getElementById('edit-in-date').value = inDate || '';
+            document.getElementById('edit-out-date').value = outDate || '';
+
+            const modal = new bootstrap.Modal(document.getElementById('editModal'));
+            modal.show();
+        }
+
+        // Save edit
+        async function saveEdit() {
+            const data = {
+                ts_code: document.getElementById('edit-ts-code').value,
+                l3_code: document.getElementById('edit-l3-code').value,
+                l3_name: document.getElementById('edit-l3-name').value,
+                in_date: document.getElementById('edit-in-date').value,
+                out_date: document.getElementById('edit-out-date').value || null,
+            };
+
+            if (!data.l3_code || !data.l3_name) {
+                alert('请填写行业代码和名称');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    alert('更新失败: ' + result.error);
+                    return;
+                }
+
+                alert('更新成功！');
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+                modal.hide();
+
+                // Refresh current view
+                if (document.getElementById('edit-ts-code').value) {
+                    showStockDetail(document.getElementById('edit-ts-code').value);
+                }
+            } catch (error) {
+                console.error('Error updating stock:', error);
+                alert('更新失败: ' + error.message);
+            }
+        }
+
+        // Enter key to search
+        document.getElementById('search-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchStocks();
+            }
+        });
+    </script>
+</body>
+</html>
+
+
