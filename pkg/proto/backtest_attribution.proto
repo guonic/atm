@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package backtest.attribution;
+
+option go_package = "github.com/nexusquant/nq/pkg/proto/backtest_attribution";
+option python_package = "nq.proto.backtest_attribution";
+
+// AttributionService provides backtest attribution analysis
+service AttributionService {
+    // GetBasicStats returns basic statistics for an experiment
+    rpc GetBasicStats(AnalysisRequest) returns (BasicStatsResponse);
+    
+    // GetTurnoverAttribution analyzes turnover attribution
+    rpc GetTurnoverAttribution(AnalysisRequest) returns (TurnoverAttributionResponse);
+    
+    // GetStructuralAnalysis analyzes structural sensitivity (for GNN models)
+    rpc GetStructuralAnalysis(StructuralRequest) returns (StructuralAnalysisResponse);
+    
+    // GetExperimentInfo returns experiment metadata
+    rpc GetExperimentInfo(ExperimentRequest) returns (ExperimentInfoResponse);
+}
+
+// AnalysisRequest is a request for analysis
+message AnalysisRequest {
+    string exp_id = 1;              // Experiment ID
+    string start_date = 2;           // Start date (ISO 8601 format, optional)
+    string end_date = 3;             // End date (ISO 8601 format, optional)
+    repeated string symbols = 4;     // Symbol filters (optional)
+    repeated string metrics = 5;     // Metrics to calculate (optional)
+}
+
+// StructuralRequest is a request for structural analysis
+message StructuralRequest {
+    string exp_id = 1;               // Experiment ID
+    string date = 2;                 // Date (ISO 8601 format)
+    string symbol = 3;               // Symbol to analyze
+    string link_type = 4;            // Link type filter (optional)
+    int32 top_k = 5;                 // Top K neighbors (optional)
+}
+
+// ExperimentRequest is a request for experiment information
+message ExperimentRequest {
+    string exp_id = 1;               // Experiment ID
+}
+
+// BasicStatsResponse contains basic statistics
+message BasicStatsResponse {
+    string exp_id = 1;
+    BasicStats stats = 2;
+    string error = 3;                // Error message if any
+}
+
+// BasicStats contains basic backtest statistics
+message BasicStats {
+    double win_rate = 1;             // Win rate (0-1)
+    double profit_factor = 2;       // Profit factor
+    double sharpe_ratio = 3;        // Sharpe ratio
+    double max_drawdown = 4;         // Maximum drawdown
+    double total_return = 5;         // Total return
+    double annualized_return = 6;   // Annualized return
+    int32 total_trades = 7;          // Total number of trades
+    int32 winning_trades = 8;        // Number of winning trades
+    int32 losing_trades = 9;         // Number of losing trades
+    double avg_profit = 10;          // Average profit per trade
+    double avg_loss = 11;            // Average loss per trade
+    double profit_loss_ratio = 12;   // Profit/Loss ratio
+}
+
+// TurnoverAttributionResponse contains turnover attribution analysis
+message TurnoverAttributionResponse {
+    string exp_id = 1;
+    TurnoverAttribution attribution = 2;
+    string error = 3;
+}
+
+// TurnoverAttribution contains turnover attribution metrics
+message TurnoverAttribution {
+    double total_turnover = 1;       // Total turnover rate
+    double rank_edge_turnover = 2;  // Turnover due to rank edge (rank 5->6)
+    double stop_loss_turnover = 3;   // Turnover due to stop loss
+    double rank_out_turnover = 4;    // Turnover due to rank out
+    map<string, double> reason_breakdown = 5;  // Breakdown by reason
+    int32 rank_edge_count = 6;       // Number of rank edge trades
+    double signal_noise_ratio = 7;   // Signal to noise ratio
+}
+
+// StructuralAnalysisResponse contains structural analysis results
+message StructuralAnalysisResponse {
+    string exp_id = 1;
+    StructuralAnalysis analysis = 2;
+    string error = 3;
+}
+
+// StructuralAnalysis contains structural analysis metrics
+message StructuralAnalysis {
+    string symbol = 1;
+    string date = 2;
+    repeated Neighbor neighbors = 3;  // Top neighbors
+    double neighbor_weight_concentration = 4;  // Weight concentration
+    double contagion_score = 5;       // Contagion score
+    repeated string high_weight_neighbors = 6;  // High weight neighbor symbols
+}
+
+// Neighbor represents a neighbor node in the graph
+message Neighbor {
+    string symbol = 1;               // Neighbor symbol
+    double weight = 2;                // Link weight
+    string link_type = 3;             // Link type
+}
+
+// ExperimentInfoResponse contains experiment information
+message ExperimentInfoResponse {
+    string exp_id = 1;
+    ExperimentInfo info = 2;
+    string error = 3;
+}
+
+// ExperimentInfo contains experiment metadata
+message ExperimentInfo {
+    string name = 1;
+    string model_type = 2;
+    string engine_type = 3;
+    string start_date = 4;
+    string end_date = 5;
+    map<string, string> config = 6;  // Configuration parameters
+    map<string, double> metrics_summary = 7;  // Summary metrics
+    string status = 8;
+    int32 version = 9;
+    string created_at = 10;
+    string updated_at = 11;
+}
+
