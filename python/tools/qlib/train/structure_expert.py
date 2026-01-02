@@ -369,13 +369,14 @@ def load_structure_expert_model(
     Load trained Structure Expert model from checkpoint file.
 
     This function loads a trained Structure Expert GNN model from a PyTorch checkpoint
-    file (.pth) and sets it to evaluation mode for inference.
+    file (.pth) and sets it to evaluation mode for inference. It automatically detects
+    model parameters from the state_dict if not provided.
 
     Args:
         model_path: Path to model checkpoint file (.pth).
         n_feat: Number of input features (default: 158 for Alpha158).
-        n_hidden: Hidden layer size (default: 128).
-        n_heads: Number of attention heads (default: 8).
+        n_hidden: Hidden layer size (default: 128). Will be auto-detected if None.
+        n_heads: Number of attention heads (default: 8). Will be auto-detected if None.
         device: Device to load model on ('cuda' or 'cpu', default: 'cuda').
 
     Returns:
@@ -383,6 +384,7 @@ def load_structure_expert_model(
 
     Raises:
         FileNotFoundError: If model file does not exist.
+        RuntimeError: If model parameters cannot be inferred or model loading fails.
 
     Examples:
         >>> model = load_structure_expert_model("models/structure_expert.pth")
@@ -393,17 +395,70 @@ def load_structure_expert_model(
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
     logger.info(f"Loading Structure Expert model from {model_path}")
-    logger.info(f"Model parameters: n_feat={n_feat}, n_hidden={n_hidden}, n_heads={n_heads}")
 
-    # Initialize model
-    model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=n_heads)
+    # Load state_dict first to infer parameters
+    device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
+    state_dict = torch.load(model_path, map_location=device_obj)
 
-    # Load weights
-    state_dict = torch.load(model_path, map_location=device)
-    model.load_state_dict(state_dict)
+    # Auto-detect parameters from state_dict if needed
+    detected_n_feat = n_feat
+    detected_n_hidden = n_hidden
+    detected_n_heads = n_heads
+
+    # Try to infer n_feat from shortcut layer (if exists)
+    if "shortcut.weight" in state_dict:
+        detected_n_feat = state_dict["shortcut.weight"].shape[1]
+        detected_n_hidden = state_dict["shortcut.weight"].shape[0]
+        logger.info(f"Detected shortcut layer: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}")
+    # Try to infer from conv1 layer
+    elif "conv1.lin_l.weight" in state_dict:
+        # GATv2Conv: lin_l is [n_heads * n_hidden, n_feat]
+        conv1_out_dim = state_dict["conv1.lin_l.weight"].shape[0]
+        detected_n_feat = state_dict["conv1.lin_l.weight"].shape[1]
+        detected_n_heads = n_heads  # Keep provided value or default
+        if detected_n_heads > 0:
+            detected_n_hidden = conv1_out_dim // detected_n_heads
+        logger.info(f"Detected from conv1: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}, n_heads={detected_n_heads}")
+    # Try to infer from conv2 layer
+    elif "conv2.lin_l.weight" in state_dict:
+        # conv2 input is n_hidden * n_heads from conv1 output
+        conv2_in_dim = state_dict["conv2.lin_l.weight"].shape[1]
+        conv2_out_dim = state_dict["conv2.lin_l.weight"].shape[0]
+        detected_n_hidden = conv2_out_dim
+        if detected_n_heads > 0:
+            # conv2 input should be n_hidden * n_heads
+            detected_n_hidden = conv2_in_dim // detected_n_heads if detected_n_heads > 0 else conv2_out_dim
+        logger.info(f"Detected from conv2: n_hidden={detected_n_hidden}")
+
+    # Use detected values if they differ from provided defaults
+    if detected_n_feat != n_feat or detected_n_hidden != n_hidden:
+        logger.info(f"Using auto-detected parameters: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}, n_heads={detected_n_heads}")
+        n_feat = detected_n_feat
+        n_hidden = detected_n_hidden
+    else:
+        logger.info(f"Using provided parameters: n_feat={n_feat}, n_hidden={n_hidden}, n_heads={detected_n_heads}")
+
+    # Initialize model with correct parameters
+    model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=detected_n_heads)
+
+    # Load weights with strict=False to handle missing or extra keys
+    try:
+        model.load_state_dict(state_dict, strict=True)
+        logger.info("Model loaded with strict=True (all keys matched)")
+    except RuntimeError as e:
+        if "Missing key(s)" in str(e) or "Unexpected key(s)" in str(e):
+            logger.warning(f"Model loading with strict=True failed: {e}")
+            logger.info("Attempting to load with strict=False (allowing missing/extra keys)")
+            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+            if missing_keys:
+                logger.warning(f"Missing keys (not loaded): {missing_keys}")
+            if unexpected_keys:
+                logger.warning(f"Unexpected keys (ignored): {unexpected_keys}")
+            logger.info("Model loaded with strict=False (some keys may be missing)")
+        else:
+            raise
 
     # Move to device and set to eval mode (inference only, no training)
-    device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
     model = model.to(device_obj)
     model.eval()  # Set to evaluation mode - no gradient computation, no training
 

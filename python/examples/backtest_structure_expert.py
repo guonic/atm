@@ -141,6 +141,9 @@ from nq.config import load_config
 from nq.utils.data_normalize import normalize_index_code, normalize_stock_code
 from nq.utils.industry import load_industry_label_map, load_industry_map
 from nq.utils.model import save_embeddings as save_embeddings_to_file
+from nq.analysis.backtest.edios_integration import EdiosBacktestWriter
+from nq.analysis.backtest.edios_structure_expert import save_structure_expert_backtest_to_edios
+from nq.analysis.backtest.qlib_types import QlibBacktestResult
 
 # Import structure expert model using standard package import
 from tools.qlib.train.structure_expert import (
@@ -2140,6 +2143,17 @@ def main():
         action="store_true",
         help="Explicitly disable benchmark comparison",
     )
+    parser.add_argument(
+        "--enable_edios",
+        action="store_true",
+        help="Enable EDiOS integration to save backtest results to database",
+    )
+    parser.add_argument(
+        "--edios_exp_name",
+        type=str,
+        default=None,
+        help="EDiOS experiment name (default: auto-generated from parameters)",
+    )
 
     args = parser.parse_args()
 
@@ -2335,6 +2349,108 @@ def main():
             benchmark=benchmark,
             skip_auto_detect=skip_auto_detect,
         )
+
+        # Extract portfolio_metric and indicator from results
+        portfolio_metric = results.get("portfolio_metric")
+        indicator = results.get("indicator")
+
+        # EDiOS Integration
+        if args.enable_edios:
+            try:
+                if db_config is None:
+                    logger.warning(
+                        "EDiOS enabled but no database config found. "
+                        "Please provide --config_path to enable EDiOS."
+                    )
+                else:
+                    logger.info("Saving backtest results to EDiOS...")
+                    
+                    # Create EDiOS writer
+                    writer = EdiosBacktestWriter(db_config)
+                    
+                    # Generate experiment name if not provided
+                    exp_name = args.edios_exp_name
+                    if exp_name is None:
+                        exp_name = (
+                            f"Structure Expert - {args.strategy} - "
+                            f"TopK{args.top_k} - {args.start_date}_{args.end_date}"
+                        )
+                    
+                    # Create experiment
+                    from datetime import date as date_type
+                    exp_id = writer.create_experiment_from_backtest(
+                        name=exp_name,
+                        start_date=date_type.fromisoformat(args.start_date),
+                        end_date=date_type.fromisoformat(args.end_date),
+                        config={
+                            "topk": args.top_k,
+                            "strategy": args.strategy,
+                            "buffer_ratio": args.buffer_ratio,
+                            "retain_threshold": args.retain_threshold,
+                            "initial_cash": args.initial_cash,
+                            "model_path": args.model_path,
+                            "n_feat": args.n_feat,
+                            "n_hidden": args.n_hidden,
+                            "n_heads": args.n_heads,
+                        },
+                        model_type="GNN",
+                        engine_type="Qlib",
+                        strategy_name="Structure Expert",
+                    )
+                    
+                    logger.info(f"Created EDiOS experiment: {exp_id}")
+                    
+                    # Convert Qlib output to standard structure
+                    qlib_result = QlibBacktestResult.from_qlib_output(
+                        portfolio_metric=portfolio_metric,
+                        indicator=indicator,
+                    )
+                    
+                    # Save backtest results
+                    counts = save_structure_expert_backtest_to_edios(
+                        exp_id=exp_id,
+                        writer=writer,
+                        qlib_result=qlib_result,
+                        predictions=predictions,
+                        initial_cash=args.initial_cash,
+                        builder=builder,
+                        model=model,
+                        device=torch.device(args.device),
+                        embeddings_dict=None,  # TODO: Collect embeddings during prediction
+                    )
+                    
+                    # Calculate summary metrics for finalization
+                    metrics_summary = {}
+                    
+                    # Use standard structure
+                    qlib_result = QlibBacktestResult.from_qlib_output(
+                        portfolio_metric=portfolio_metric,
+                        indicator=indicator,
+                    )
+                    metric_df = qlib_result.portfolio_metrics.metric_df
+                    
+                    if metric_df is not None and not metric_df.empty:
+                        if "return" in metric_df.columns:
+                            returns = metric_df["return"]
+                            metrics_summary["return"] = float(returns.mean())
+                            metrics_summary["sharpe"] = (
+                                float(returns.mean() / returns.std() * (252 ** 0.5))
+                                if returns.std() > 0
+                                else 0.0
+                            )
+                            # Calculate max drawdown
+                            cum_returns = (1 + returns).cumprod()
+                            running_max = cum_returns.expanding().max()
+                            drawdown = (cum_returns - running_max) / running_max
+                            metrics_summary["max_drawdown"] = float(drawdown.min())
+                    
+                    # Finalize experiment
+                    writer.finalize_experiment(exp_id, metrics_summary=metrics_summary)
+                    logger.info(f"✓ EDiOS integration completed. Experiment ID: {exp_id}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to save to EDiOS: {e}", exc_info=True)
+                logger.warning("Continuing without EDiOS integration...")
 
         # Print results
         print_results(results)
