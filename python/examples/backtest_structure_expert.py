@@ -2401,9 +2401,9 @@ def main():
                     logger.info(f"Created EDiOS experiment: {exp_id}")
                     
                     # Convert Qlib output to standard structure
-                    qlib_result = QlibBacktestResult.from_qlib_output(
-                        portfolio_metric=portfolio_metric,
-                        indicator=indicator,
+                    qlib_result = QlibBacktestResult.from_qlib_dict_output(
+                        portfolio_metric_dict=portfolio_metric,
+                        indicator_dict=indicator,
                     )
                     
                     # Save backtest results
@@ -2422,11 +2422,8 @@ def main():
                     # Calculate summary metrics for finalization
                     metrics_summary = {}
                     
-                    # Use standard structure
-                    qlib_result = QlibBacktestResult.from_qlib_output(
-                        portfolio_metric=portfolio_metric,
-                        indicator=indicator,
-                    )
+                    # Use standard structure (reuse the one created above)
+                    # qlib_result is already created above, no need to recreate
                     metric_df = qlib_result.portfolio_metrics.metric_df
                     
                     if metric_df is not None and not metric_df.empty:
