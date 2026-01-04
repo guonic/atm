@@ -1,0 +1,102 @@
+import { useState, useEffect } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { getLedger } from '@/services/api'
+import type { LedgerEntry } from '@/types/eidos'
+import { format } from 'date-fns'
+
+interface NavChartProps {
+  expId: string
+}
+
+function NavChart({ expId }: NavChartProps) {
+  const [data, setData] = useState<Array<{ date: string; nav: number }>>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadData()
+  }, [expId])
+
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      const ledger = await getLedger(expId)
+      const chartData = ledger
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .map((entry) => ({
+          date: format(new Date(entry.date), 'yyyy-MM-dd'),
+          nav: entry.nav,
+        }))
+      setData(chartData)
+    } catch (error) {
+      console.error('Failed to load ledger data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+        <div className="text-eidos-muted text-xs">加载中...</div>
+      </div>
+    )
+  }
+
+  if (data.length === 0) {
+    return (
+      <div>
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+        <div className="text-eidos-muted text-xs">暂无数据</div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#333" opacity={0.3} />
+          <XAxis 
+            dataKey="date" 
+            tick={{ fontSize: 10, fill: '#8B949E' }}
+            angle={-45}
+            textAnchor="end"
+            height={60}
+          />
+          <YAxis 
+            tick={{ fontSize: 10, fill: '#8B949E' }}
+            label={{ value: '净值', angle: -90, position: 'insideLeft', fill: '#8B949E', style: { fontSize: 10 } }}
+          />
+          <Tooltip 
+            contentStyle={{
+              backgroundColor: '#161B22',
+              border: 'none',
+              borderRadius: '8px',
+              color: '#8B949E',
+              padding: '8px',
+            }}
+            formatter={(value: number) => value.toFixed(4)}
+            labelFormatter={(label) => `日期: ${label}`}
+          />
+          <Legend 
+            wrapperStyle={{ color: '#8B949E', fontSize: '10px' }}
+          />
+          <Line 
+            type="monotone" 
+            dataKey="nav" 
+            stroke="#00F2FF" 
+            strokeWidth={1.5}
+            name="净值"
+            dot={false}
+            activeDot={{ r: 3, fill: '#00F2FF' }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export default NavChart
+

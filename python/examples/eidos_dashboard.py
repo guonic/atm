@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-EDiOS Dashboard - Streamlit Web Application
+Eidos Dashboard - Streamlit Web Application
 
-Launch the EDiOS visualization dashboard using Streamlit.
+Launch the Eidos visualization dashboard using Streamlit.
 
 Usage:
     streamlit run python/examples/edios_dashboard.py
@@ -23,11 +23,11 @@ sys.path.insert(0, str(python_dir))
 sys.path.insert(0, str(project_root))
 
 # Now import the module
-from nq.analysis.edios.visualization import EdiosVisualization
+from nq.analysis.eidos.visualization import EidosVisualization
 
 if __name__ == "__main__":
     # Initialize visualization
-    viz = EdiosVisualization()
+    viz = EidosVisualization()
     
     # Run Streamlit app
     viz.run_streamlit_app()

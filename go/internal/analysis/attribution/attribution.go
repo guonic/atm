@@ -24,18 +24,18 @@ func NewAttributionService(db *sql.DB) *AttributionService {
 
 // BasicStats contains basic backtest statistics.
 type BasicStats struct {
-	WinRate            float64
-	ProfitFactor       float64
-	SharpeRatio        float64
-	MaxDrawdown        float64
-	TotalReturn        float64
-	AnnualizedReturn   float64
-	TotalTrades        int32
-	WinningTrades      int32
-	LosingTrades       int32
-	AvgProfit          float64
-	AvgLoss            float64
-	ProfitLossRatio    float64
+	WinRate          float64
+	ProfitFactor     float64
+	SharpeRatio      float64
+	MaxDrawdown      float64
+	TotalReturn      float64
+	AnnualizedReturn float64
+	TotalTrades      int32
+	WinningTrades    int32
+	LosingTrades     int32
+	AvgProfit        float64
+	AvgLoss          float64
+	ProfitLossRatio  float64
 }
 
 // GetBasicStats calculates basic statistics for an experiment.
@@ -94,7 +94,7 @@ func (s *AttributionService) calculateTradeStats(
 			COALESCE(ABS(SUM(pnl_ratio) FILTER (WHERE pnl_ratio < 0)), 0) as total_loss,
 			COALESCE(AVG(pnl_ratio) FILTER (WHERE pnl_ratio > 0), 0) as avg_profit,
 			COALESCE(AVG(pnl_ratio) FILTER (WHERE pnl_ratio < 0), 0) as avg_loss
-		FROM edios.bt_trades
+		FROM eidos.bt_trades
 		WHERE exp_id = $1 AND pnl_ratio IS NOT NULL
 	`
 	args := []interface{}{expID}
@@ -154,7 +154,7 @@ func (s *AttributionService) calculatePerformanceMetrics(
 ) (sharpeRatio, maxDrawdown, totalReturn, annualizedReturn float64, err error) {
 	query := `
 		SELECT date, nav
-		FROM edios.bt_ledger
+		FROM eidos.bt_ledger
 		WHERE exp_id = $1
 	`
 	args := []interface{}{expID}
@@ -265,13 +265,13 @@ func (s *AttributionService) calculatePerformanceMetrics(
 
 // TurnoverAttribution contains turnover attribution metrics.
 type TurnoverAttribution struct {
-	TotalTurnover      float64
-	RankEdgeTurnover   float64
-	StopLossTurnover   float64
-	RankOutTurnover    float64
-	ReasonBreakdown    map[string]float64
-	RankEdgeCount      int32
-	SignalNoiseRatio   float64
+	TotalTurnover    float64
+	RankEdgeTurnover float64
+	StopLossTurnover float64
+	RankOutTurnover  float64
+	ReasonBreakdown  map[string]float64
+	RankEdgeCount    int32
+	SignalNoiseRatio float64
 }
 
 // GetTurnoverAttribution analyzes turnover attribution.
@@ -286,7 +286,7 @@ func (s *AttributionService) GetTurnoverAttribution(
 			reason,
 			COUNT(*) as count,
 			SUM(ABS(amount * price)) as turnover
-		FROM edios.bt_trades
+		FROM eidos.bt_trades
 		WHERE exp_id = $1 AND side = -1 AND reason IS NOT NULL
 	`
 	args := []interface{}{expID}
@@ -339,7 +339,7 @@ func (s *AttributionService) GetTurnoverAttribution(
 	// Get total turnover from ledger
 	ledgerQuery := `
 		SELECT SUM(deal_amount) as total_deal_amount
-		FROM edios.bt_ledger
+		FROM eidos.bt_ledger
 		WHERE exp_id = $1
 	`
 	ledgerArgs := []interface{}{expID}
@@ -381,19 +381,19 @@ func (s *AttributionService) GetTurnoverAttribution(
 
 // StructuralAnalysis contains structural analysis metrics.
 type StructuralAnalysis struct {
-	Symbol                    string
-	Date                     time.Time
-	Neighbors                []Neighbor
+	Symbol                      string
+	Date                        time.Time
+	Neighbors                   []Neighbor
 	NeighborWeightConcentration float64
-	ContagionScore           float64
-	HighWeightNeighbors      []string
+	ContagionScore              float64
+	HighWeightNeighbors         []string
 }
 
 // Neighbor represents a neighbor node.
 type Neighbor struct {
-	Symbol    string
-	Weight    float64
-	LinkType  string
+	Symbol   string
+	Weight   float64
+	LinkType string
 }
 
 // GetStructuralAnalysis analyzes structural sensitivity.
@@ -407,7 +407,7 @@ func (s *AttributionService) GetStructuralAnalysis(
 ) (*StructuralAnalysis, error) {
 	query := `
 		SELECT source, target, weight, link_type
-		FROM edios.bt_model_links
+		FROM eidos.bt_model_links
 		WHERE exp_id = $1 AND date = $2 AND (source = $3 OR target = $3)
 	`
 	args := []interface{}{expID, date, symbol}
@@ -481,4 +481,3 @@ func (s *AttributionService) GetStructuralAnalysis(
 		HighWeightNeighbors:         highWeightNeighbors,
 	}, nil
 }
-

@@ -1,4 +1,4 @@
-# EDiOS 网页端使用指南
+# Eidos 网页端使用指南
 
 ## 启动方式
 
@@ -9,13 +9,13 @@
 source .venv/bin/activate
 
 # 启动 Streamlit 应用
-streamlit run python/examples/edios_dashboard.py
+streamlit run python/examples/eidos_dashboard.py
 ```
 
 或者直接运行：
 
 ```bash
-streamlit run python/nq/analysis/edios/visualization.py
+streamlit run python/nq/analysis/eidos/visualization.py
 ```
 
 ### 方法 2: 使用 Python 直接运行
@@ -33,7 +33,7 @@ python python/examples/edios_dashboard.py
 如果需要使用特定的配置文件：
 
 ```bash
-streamlit run python/examples/edios_dashboard.py -- --config_path config/config.yaml
+streamlit run python/examples/eidos_dashboard.py -- --config_path config/config.yaml
 ```
 
 ## 访问地址
@@ -121,10 +121,10 @@ pip install streamlit plotly pandas
 **错误信息**: `No experiments found`
 
 **解决方法**:
-- 确保已经运行过回测并启用了 `--enable_edios` 参数
+- 确保已经运行过回测并启用了 `--enable_eidos` 参数
 - 检查数据库中是否有实验数据：
   ```sql
-  SELECT * FROM edios.bt_experiment;
+  SELECT * FROM eidos.bt_experiment;
   ```
 
 ### 3. 端口被占用
@@ -134,7 +134,7 @@ pip install streamlit plotly pandas
 **解决方法**:
 - 使用其他端口：
   ```bash
-  streamlit run python/examples/edios_dashboard.py --server.port 8502
+  streamlit run python/examples/eidos_dashboard.py --server.port 8502
   ```
 - 或者关闭占用端口的进程
 
@@ -152,13 +152,13 @@ pip install streamlit plotly pandas
 ### 自定义端口
 
 ```bash
-streamlit run python/examples/edios_dashboard.py --server.port 8080
+streamlit run python/examples/eidos_dashboard.py --server.port 8080
 ```
 
 ### 指定主机
 
 ```bash
-streamlit run python/examples/edios_dashboard.py --server.address 0.0.0.0
+streamlit run python/examples/eidos_dashboard.py --server.address 0.0.0.0
 ```
 
 ### 启用主题
@@ -170,12 +170,12 @@ streamlit run python/examples/edios_dashboard.py --server.address 0.0.0.0
 如果需要修改可视化代码，可以启用自动重载：
 
 ```bash
-streamlit run python/examples/edios_dashboard.py --server.runOnSave true
+streamlit run python/examples/eidos_dashboard.py --server.runOnSave true
 ```
 
 ## 相关文档
 
-- [EDiOS 使用指南](EDIOS_USAGE.md)
-- [EDiOS 数据写入功能](EDIOS_DATA_WRITING.md)
-- [EDiOS 与 Structure Expert 集成指南](EDIOS_STRUCTURE_EXPERT_INTEGRATION.md)
+- [Eidos 使用指南](EIDOS_USAGE.md)
+- [Eidos 数据写入功能](EIDOS_DATA_WRITING.md)
+- [Eidos 与 Structure Expert 集成指南](EIDOS_STRUCTURE_EXPERT_INTEGRATION.md)
 

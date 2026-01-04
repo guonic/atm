@@ -77,7 +77,7 @@ import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Gymnasium compatibility patch for Qlib - MUST be before any qlib imports
 # Qlib's RL module imports 'gym', but gym is unmaintained.
@@ -112,6 +112,7 @@ import pandas as pd
 import qlib
 import torch
 from qlib.backtest import backtest, executor
+from qlib.backtest.decision import Order as QlibOrder
 from qlib.contrib.data.handler import Alpha158
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
 from qlib.data import D
@@ -141,8 +142,8 @@ from nq.config import load_config
 from nq.utils.data_normalize import normalize_index_code, normalize_stock_code
 from nq.utils.industry import load_industry_label_map, load_industry_map
 from nq.utils.model import save_embeddings as save_embeddings_to_file
-from nq.analysis.backtest.edios_integration import EdiosBacktestWriter
-from nq.analysis.backtest.edios_structure_expert import save_structure_expert_backtest_to_edios
+from nq.analysis.backtest.eidos_integration import EidosBacktestWriter
+from nq.analysis.backtest.eidos_structure_expert import save_structure_expert_backtest_to_eidos
 from nq.analysis.backtest.qlib_types import QlibBacktestResult
 
 # Import structure expert model using standard package import
@@ -314,7 +315,122 @@ def execution_logic(
     return next_holdings
 
 
-class RefinedTopKStrategy(TopkDropoutStrategy):
+class BaseCustomStrategy(TopkDropoutStrategy):
+    """
+    Base class for all custom strategies with order capture functionality.
+    
+    This class provides a unified interface for capturing executed orders from Qlib executor.
+    All custom strategies should inherit from this class to enable order tracking.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        """
+        Initialize base custom strategy.
+        
+        Args:
+            *args: Positional arguments passed to parent class.
+            **kwargs: Keyword arguments passed to parent class.
+        """
+        super().__init__(*args, **kwargs)
+        # Store executed orders from post_exe_step
+        self.executed_orders: List[Dict[str, Any]] = []
+    
+    def post_exe_step(self, execute_result: Optional[list]) -> None:
+        """
+        Capture executed orders from Qlib executor.
+        
+        This method is called by Qlib after each execution step to capture order information.
+        The execute_result contains a list of tuples: (order, trade_val, trade_cost, trade_price).
+        
+        Args:
+            execute_result: List of tuples, each containing (order, trade_val, trade_cost, trade_price).
+                          Each tuple represents an executed order with:
+                          - order: qlib.backtest.decision.Order object from Qlib
+                          - trade_val: Trade volume (交易量)
+                          - trade_cost: Trade cost (成本)
+                          - trade_price: Trade price (价格)
+        """
+        if execute_result is None or len(execute_result) == 0:
+            return
+        
+        # Process each executed order tuple
+        logger.debug(f"Processing {len(execute_result)} executed orders")
+        for order_tuple in execute_result:
+            # Unpack tuple: (order, trade_val, trade_cost, trade_price)
+            if len(order_tuple) != 4:
+                logger.warning(f"Unexpected execute_result tuple length: {len(order_tuple)}, expected 4")
+                continue
+            
+            order: QlibOrder
+            order, trade_val, trade_cost, trade_price = order_tuple
+            
+            # Debug: Log all order information to understand Qlib's direction values
+            logger.debug(
+                f"Order details: stock_id={order.stock_id}, "
+                f"direction={order.direction} (type={type(order.direction).__name__}), "
+                f"amount={order.amount}, price={trade_price}, "
+                f"hasattr(direction)={hasattr(order, 'direction')}"
+            )
+            
+            # Extract order information from qlib.backtest.decision.Order
+            # Qlib Order object has: stock_id, amount, direction, factor, start_time, end_time, etc.
+            # direction must be 1 (Buy) or -1 (Sell) to satisfy database constraint
+            # Note: We've already filtered out direction==0 above, so order.direction is either 1 or -1
+            order_info = {
+                "instrument": order.stock_id,  # Qlib Order uses stock_id attribute
+                "amount": order.amount,
+                "direction": -1 if order.direction == 0 else 1,  # 1=Buy, -1=Sell (already filtered out 0)
+                "factor": order.factor,
+                "trade_val": float(trade_val),  # 交易量
+                "trade_cost": float(trade_cost),  # 成本
+                "trade_price": float(trade_price),  # 价格
+                "deal_time": order.end_time,
+            }
+            
+            # Store order information
+            self.executed_orders.append(order_info)
+            
+            # Log order execution
+            direction_str = "BUY" if order_info["direction"] == 1 else "SELL"
+            date_str = f" on {order_info['deal_time']}" if order_info['deal_time'] else ""
+            logger.info(
+                f"Order executed{date_str}: {direction_str} {order_info['instrument']}, "
+                f"amount={order_info['amount']}, price={order_info['trade_price']:.4f}, "
+                f"val={order_info['trade_val']:.2f}, cost={order_info['trade_cost']:.2f}, "
+                f"direction={order_info['direction']} (order.direction={order.direction})"
+            )
+    
+    def get_executed_orders(self) -> List[Dict[str, Any]]:
+        """
+        Get all executed orders captured during backtest.
+        
+        Returns:
+            List of executed order dictionaries, each containing:
+            - instrument: Stock symbol
+            - amount: Order amount
+            - direction: Order direction (1=Buy, -1=Sell)
+            - factor: Order factor
+            - trade_val: Trade volume
+            - trade_cost: Trade cost
+            - trade_price: Trade price
+        """
+        # Log summary of captured orders
+        buy_count = sum(1 for o in self.executed_orders if o.get("direction") == 1)
+        sell_count = sum(1 for o in self.executed_orders if o.get("direction") == -1)
+        other_count = len(self.executed_orders) - buy_count - sell_count
+        logger.info(
+            f"Total executed orders: {len(self.executed_orders)}, "
+            f"BUY: {buy_count}, SELL: {sell_count}, Other: {other_count}"
+        )
+        if other_count > 0:
+            # Log orders with unexpected direction values
+            for o in self.executed_orders:
+                if o.get("direction") not in [1, -1]:
+                    logger.warning(f"Order with unexpected direction: {o}")
+        return self.executed_orders.copy()
+
+
+class RefinedTopKStrategy(BaseCustomStrategy):
     """
     Custom strategy with reduced turnover using buffer mechanism.
 
@@ -422,7 +538,7 @@ class RefinedTopKStrategy(TopkDropoutStrategy):
         return refined_signal
 
 
-class SimpleLowTurnoverStrategy(TopkDropoutStrategy):
+class SimpleLowTurnoverStrategy(BaseCustomStrategy):
     """
     Simple low turnover strategy with retain threshold.
 
@@ -1165,6 +1281,7 @@ def run_backtest(
         "time_per_step": "day",
         "generate_portfolio_metrics": True,
         "verbose": True,
+        "track_data": True,
     }
 
     # Run backtest
@@ -1175,9 +1292,12 @@ def run_backtest(
     else:
         logger.debug("No benchmark key in config")
     
+    # Create executor instance to access trade history after backtest
+    exec_instance = executor.SimulatorExecutor(**exec_config)
+    
     try:
         portfolio_metric, indicator = backtest(
-            executor=executor.SimulatorExecutor(**exec_config),
+            executor=exec_instance,
             strategy=strategy,
             **backtest_config,
         )
@@ -1247,6 +1367,7 @@ def run_backtest(
     results = {
         "portfolio_metric": portfolio_metric,
         "indicator": indicator,
+        "executor": exec_instance,  # Include executor to access trade history if available
     }
 
     logger.info("Backtest completed successfully")
@@ -2144,15 +2265,15 @@ def main():
         help="Explicitly disable benchmark comparison",
     )
     parser.add_argument(
-        "--enable_edios",
+        "--enable_eidos",
         action="store_true",
-        help="Enable EDiOS integration to save backtest results to database",
+        help="Enable Eidos integration to save backtest results to database",
     )
     parser.add_argument(
-        "--edios_exp_name",
+        "--eidos_exp_name",
         type=str,
         default=None,
-        help="EDiOS experiment name (default: auto-generated from parameters)",
+        help="Eidos experiment name (default: auto-generated from parameters)",
     )
 
     args = parser.parse_args()
@@ -2355,22 +2476,22 @@ def main():
         portfolio_metric = results.get("portfolio_metric")
         indicator = results.get("indicator")
 
-        # EDiOS Integration
-        if args.enable_edios:
+        # Eidos Integration
+        if args.enable_eidos:
             try:
                 if db_config is None:
                     logger.warning(
-                        "EDiOS enabled but no database config found. "
-                        "Please provide --config_path to enable EDiOS."
+                        "Eidos enabled but no database config found. "
+                        "Please provide --config_path to enable Eidos."
                     )
                 else:
-                    logger.info("Saving backtest results to EDiOS...")
+                    logger.info("Saving backtest results to Eidos...")
                     
-                    # Create EDiOS writer
-                    writer = EdiosBacktestWriter(db_config)
+                    # Create Eidos writer
+                    writer = EidosBacktestWriter(db_config)
                     
                     # Generate experiment name if not provided
-                    exp_name = args.edios_exp_name
+                    exp_name = args.eidos_exp_name
                     if exp_name is None:
                         exp_name = (
                             f"Structure Expert - {args.strategy} - "
@@ -2399,7 +2520,7 @@ def main():
                         strategy_name="Structure Expert",
                     )
                     
-                    logger.info(f"Created EDiOS experiment: {exp_id}")
+                    logger.info(f"Created Eidos experiment: {exp_id}")
                     
                     # Convert Qlib output to standard structure
                     qlib_result = QlibBacktestResult.from_qlib_dict_output(
@@ -2408,7 +2529,7 @@ def main():
                     )
                     
                     # Save backtest results
-                    counts = save_structure_expert_backtest_to_edios(
+                    counts = save_structure_expert_backtest_to_eidos(
                         exp_id=exp_id,
                         writer=writer,
                         qlib_result=qlib_result,
@@ -2418,6 +2539,7 @@ def main():
                         model=model,
                         device=torch.device(args.device),
                         embeddings_dict=None,  # TODO: Collect embeddings during prediction
+                        strategy_instance=strategy,  # Pass strategy instance for order extraction
                     )
                     
                     # Calculate summary metrics for finalization
@@ -2444,14 +2566,14 @@ def main():
                     
                     # Finalize experiment
                     writer.finalize_experiment(exp_id, metrics_summary=metrics_summary)
-                    logger.info(f"✓ EDiOS integration completed. Experiment ID: {exp_id}")
+                    logger.info(f"✓ Eidos integration completed. Experiment ID: {exp_id}")
                     
             except Exception as e:
-                logger.error(f"Failed to save to EDiOS: {e}", exc_info=True)
-                logger.warning("Continuing without EDiOS integration...")
+                logger.error(f"Failed to save to Eidos: {e}", exc_info=True)
+                logger.warning("Continuing without Eidos integration...")
 
         # Print results
-        print_results(results)
+        # print_results(results)
 
         # Plot results if requested
         if args.plot:
