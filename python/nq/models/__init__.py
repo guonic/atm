@@ -22,6 +22,14 @@ from nq.models.stock import (
     StockTradeRule,
 )
 from nq.models.trading_calendar import TradingCalendar
+from nq.models.eidos import (
+    Experiment,
+    LedgerEntry,
+    Trade,
+    ModelOutput,
+    ModelLink,
+    Embedding,
+)
 
 __all__ = [
     # Base model
@@ -46,5 +54,12 @@ __all__ = [
     "StockKline1Min",
     # Trading calendar
     "TradingCalendar",
+    # Eidos models
+    "Experiment",
+    "LedgerEntry",
+    "Trade",
+    "ModelOutput",
+    "ModelLink",
+    "Embedding",
 ]
 

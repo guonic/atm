@@ -1,7 +1,7 @@
 """
-EDiOS Integration for Backtest System.
+Eidos Integration for Backtest System.
 
-Provides integration layer to automatically save backtest results to EDiOS system.
+Provides integration layer to automatically save backtest results to Eidos system.
 """
 
 import logging
@@ -12,28 +12,28 @@ import pandas as pd
 
 from nq.analysis.backtest.base import BacktestResult, BaseBacktester
 from nq.config import DatabaseConfig
-from nq.repo.edios_repo import EdiosRepo
+from nq.repo.eidos_repo import EidosRepo
 
 logger = logging.getLogger(__name__)
 
 
-class EdiosBacktestWriter:
+class EidosBacktestWriter:
     """
-    Writer for saving backtest results to EDiOS system.
+    Writer for saving backtest results to Eidos system.
     
-    This class provides methods to convert backtest results into EDiOS format
+    This class provides methods to convert backtest results into Eidos format
     and save them to the database.
     """
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
-        Initialize EDiOS backtest writer.
+        Initialize Eidos backtest writer.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
-        self.repo = EdiosRepo(db_config, schema)
+        self.repo = EidosRepo(db_config, schema)
         self.schema = schema
 
     def create_experiment_from_backtest(
@@ -83,7 +83,7 @@ class EdiosBacktestWriter:
         broker_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         """
-        Save a single backtest result to EDiOS.
+        Save a single backtest result to Eidos.
 
         Args:
             exp_id: Experiment ID.
@@ -135,7 +135,7 @@ class EdiosBacktestWriter:
                 trades_data.append({
                     "symbol": result.ts_code,
                     "deal_time": trade.get("deal_time", result.backtest_date),
-                    "side": trade.get("side", 1),  # 1=Buy, -1=Sell
+                    "direction": trade.get("direction", trade.get("side", 1)),  # 1=Buy, -1=Sell
                     "price": trade.get("price", 0.0),
                     "amount": trade.get("amount", 0),
                     "rank_at_deal": trade.get("rank_at_deal"),
@@ -148,11 +148,11 @@ class EdiosBacktestWriter:
         # Check if signals are in metadata (convert signals to trades)
         elif "signals" in result.metadata:
             for signal in result.metadata["signals"]:
-                side = 1 if signal.get("signal_type") in ["buy", "add"] else -1
+                direction = 1 if signal.get("signal_type") in ["buy", "add"] else -1
                 trades_data.append({
                     "symbol": result.ts_code,
                     "deal_time": signal.get("signal_time", result.backtest_date),
-                    "side": side,
+                    "direction": direction,
                     "price": signal.get("price", 0.0),
                     "amount": signal.get("size", 0),
                     "reason": signal.get("signal_type"),
@@ -238,50 +238,6 @@ class EdiosBacktestWriter:
 
         return outputs_data
 
-    def save_batch_results(
-        self,
-        exp_id: str,
-        results: List[BacktestResult],
-        broker_data_list: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, int]:
-        """
-        Save multiple backtest results to EDiOS.
-
-        Args:
-            exp_id: Experiment ID.
-            results: List of backtest results.
-            broker_data_list: List of broker data (optional).
-
-        Returns:
-            Dictionary with counts of inserted records.
-        """
-        all_ledger_data = []
-        all_trades_data = []
-        all_model_outputs_data = []
-
-        for idx, result in enumerate(results):
-            # Extract ledger data
-            if broker_data_list and idx < len(broker_data_list):
-                broker_data = broker_data_list[idx]
-                if "ledger" in broker_data:
-                    all_ledger_data.extend(broker_data["ledger"])
-
-            # Extract trades
-            trades = self._extract_trades_from_result(exp_id, result)
-            all_trades_data.extend(trades)
-
-            # Extract model outputs
-            outputs = self._extract_model_outputs_from_result(exp_id, result)
-            all_model_outputs_data.extend(outputs)
-
-        # Save all data in a single transaction
-        return self.repo.save_backtest_results(
-            exp_id=exp_id,
-            ledger_data=all_ledger_data if all_ledger_data else None,
-            trades_data=all_trades_data if all_trades_data else None,
-            model_outputs_data=all_model_outputs_data if all_model_outputs_data else None,
-        )
-
     def finalize_experiment(
         self,
         exp_id: str,
@@ -300,22 +256,22 @@ class EdiosBacktestWriter:
         logger.info(f"Finalized experiment: {exp_id}")
 
 
-class EdiosBacktesterMixin:
+class EidosBacktesterMixin:
     """
-    Mixin class to add EDiOS integration to existing backtesters.
+    Mixin class to add Eidos integration to existing backtesters.
     
     Usage:
-        class MyBacktester(BaseBacktester, EdiosBacktesterMixin):
+        class MyBacktester(BaseBacktester, EidosBacktesterMixin):
             ...
     """
 
     def __init__(self, *args, **kwargs):
-        """Initialize with EDiOS support."""
+        """Initialize with Eidos support."""
         super().__init__(*args, **kwargs)
-        self.edios_writer: Optional[EdiosBacktestWriter] = None
-        self.edios_exp_id: Optional[str] = None
+        self.eidos_writer: Optional[EidosBacktestWriter] = None
+        self.eidos_exp_id: Optional[str] = None
 
-    def enable_edios(
+    def enable_eidos(
         self,
         db_config: DatabaseConfig,
         exp_id: Optional[str] = None,
@@ -324,7 +280,7 @@ class EdiosBacktesterMixin:
         config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Enable EDiOS integration for this backtester.
+        Enable Eidos integration for this backtester.
 
         Args:
             db_config: Database configuration.
@@ -336,15 +292,15 @@ class EdiosBacktesterMixin:
         Returns:
             Experiment ID.
         """
-        self.edios_writer = EdiosBacktestWriter(db_config)
+        self.eidos_writer = EidosBacktestWriter(db_config)
 
         if exp_id:
-            self.edios_exp_id = exp_id
+            self.eidos_exp_id = exp_id
         elif experiment_name:
             # Create new experiment
             from datetime import date
 
-            self.edios_exp_id = self.edios_writer.create_experiment_from_backtest(
+            self.eidos_exp_id = self.eidos_writer.create_experiment_from_backtest(
                 name=experiment_name,
                 start_date=date.today(),  # Will be updated from actual backtest
                 end_date=date.today(),
@@ -354,15 +310,15 @@ class EdiosBacktesterMixin:
         else:
             raise ValueError("Either exp_id or experiment_name must be provided")
 
-        return self.edios_exp_id
+        return self.eidos_exp_id
 
-    def save_to_edios(
+    def save_to_eidos(
         self,
         result: BacktestResult,
         broker_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         """
-        Save backtest result to EDiOS.
+        Save backtest result to Eidos.
 
         Args:
             result: Backtest result.
@@ -371,10 +327,10 @@ class EdiosBacktesterMixin:
         Returns:
             Dictionary with counts of inserted records.
         """
-        if not self.edios_writer or not self.edios_exp_id:
-            raise ValueError("EDiOS not enabled. Call enable_edios() first.")
+        if not self.eidos_writer or not self.eidos_exp_id:
+            raise ValueError("Eidos not enabled. Call enable_eidos() first.")
 
-        return self.edios_writer.save_backtest_result(
-            self.edios_exp_id, result, broker_data
+        return self.eidos_writer.save_backtest_result(
+            self.eidos_exp_id, result, broker_data
         )
 

@@ -1,5 +1,5 @@
 """
-EDiOS Visualization Module.
+Eidos Visualization Module.
 
 Provides Streamlit-based visualization for backtest attribution analysis.
 """
@@ -13,11 +13,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from nq.config import DatabaseConfig, load_config
-from nq.repo.edios_repo import EdiosRepo
+from nq.repo.eidos_repo import EidosRepo
 
 
-class EdiosVisualization:
-    """Streamlit visualization for EDiOS backtest attribution."""
+class EidosVisualization:
+    """Streamlit visualization for Eidos backtest attribution."""
 
     def __init__(self, db_config: Optional[DatabaseConfig] = None):
         """
@@ -30,7 +30,7 @@ class EdiosVisualization:
             config = load_config()
             db_config = config.database
 
-        self.repo = EdiosRepo(db_config)
+        self.repo = EidosRepo(db_config)
 
     def render_experiment_selector(self) -> Optional[str]:
         """
@@ -47,7 +47,7 @@ class EdiosVisualization:
             return None
 
         if not experiments:
-            st.warning("No experiments found. Please create an experiment first by running a backtest with --enable_edios.")
+            st.warning("No experiments found. Please create an experiment first by running a backtest with --enable_eidos.")
             return None
 
         # Format experiment names
@@ -320,9 +320,9 @@ class EdiosVisualization:
 
     def run_streamlit_app(self) -> None:
         """Run the Streamlit application."""
-        st.set_page_config(page_title="EDiOS Backtest Attribution", layout="wide")
-
-        st.title("EDiOS: Universal Backtest Attribution System")
+        st.set_page_config(page_title="Eidos Backtest Attribution", layout="wide")
+        
+        st.title("Eidos: Universal Backtest Attribution System")
 
         # Experiment selector
         exp_id = self.render_experiment_selector()
@@ -345,7 +345,7 @@ class EdiosVisualization:
 
 def main():
     """Main entry point for Streamlit app."""
-    viz = EdiosVisualization()
+    viz = EidosVisualization()
     viz.run_streamlit_app()
 
 

@@ -1,14 +1,15 @@
 """
-EDiOS (Universal Backtest Attribution System) Repository.
+Eidos (Universal Backtest Attribution System) Repository.
 
 Repository for storing and retrieving backtest attribution data.
 Supports any quantitative model (GNN, time series, linear, etc.).
 """
 
 import json
+import logging
 import secrets
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -27,16 +28,16 @@ def generate_exp_id() -> str:
     return secrets.token_hex(4)
 
 
-class EdiosExperimentRepo:
+class EidosExperimentRepo:
     """Repository for backtest experiment metadata."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize experiment repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -281,16 +282,16 @@ class EdiosExperimentRepo:
         return None
 
 
-class EdiosLedgerRepo:
+class EidosLedgerRepo:
     """Repository for account ledger (daily NAV)."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize ledger repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -410,16 +411,16 @@ class EdiosLedgerRepo:
             return [dict(row._mapping) for row in result]
 
 
-class EdiosTradesRepo:
+class EidosTradesRepo:
     """Repository for trade orders."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize trades repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -490,7 +491,7 @@ class EdiosTradesRepo:
                     "exp_id": exp_id,
                     "symbol": record["symbol"],
                     "deal_time": record["deal_time"],
-                    "side": record["side"],
+                    "side": record.get("direction", record.get("side")),
                     "price": record["price"],
                     "amount": record["amount"],
                     "rank_at_deal": record.get("rank_at_deal"),
@@ -549,19 +550,26 @@ class EdiosTradesRepo:
 
         with engine.connect() as conn:
             result = conn.execute(text(sql), params)
-            return [dict(row._mapping) for row in result]
+            # Map 'side' column to 'direction' for model compatibility
+            trades = []
+            for row in result:
+                trade_dict = dict(row._mapping)
+                if "side" in trade_dict:
+                    trade_dict["direction"] = trade_dict.pop("side")
+                trades.append(trade_dict)
+            return trades
 
 
-class EdiosModelOutputsRepo:
+class EidosModelOutputsRepo:
     """Repository for model dense outputs (core table)."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize model outputs repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -692,16 +700,16 @@ class EdiosModelOutputsRepo:
             return [dict(row._mapping) for row in result]
 
 
-class EdiosModelLinksRepo:
+class EidosModelLinksRepo:
     """Repository for model topology links (for GNN models)."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize model links repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -828,16 +836,16 @@ class EdiosModelLinksRepo:
             return [dict(row._mapping) for row in result]
 
 
-class EdiosEmbeddingsRepo:
+class EidosEmbeddingsRepo:
     """Repository for model embeddings."""
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize embeddings repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
@@ -960,29 +968,29 @@ class EdiosEmbeddingsRepo:
             return [dict(row._mapping) for row in result]
 
 
-class EdiosRepo:
+class EidosRepo:
     """
     Main repository class that aggregates all EDiOS repositories.
 
     Provides a unified interface for all EDiOS data operations.
     """
 
-    def __init__(self, db_config: DatabaseConfig, schema: str = "edios"):
+    def __init__(self, db_config: DatabaseConfig, schema: str = "eidos"):
         """
         Initialize EDiOS repository.
 
         Args:
             db_config: Database configuration.
-            schema: Database schema name (default: 'edios').
+            schema: Database schema name (default: 'eidos').
         """
         self.db_config = db_config
         self.schema = schema
-        self.experiment = EdiosExperimentRepo(db_config, schema)
-        self.ledger = EdiosLedgerRepo(db_config, schema)
-        self.trades = EdiosTradesRepo(db_config, schema)
-        self.model_outputs = EdiosModelOutputsRepo(db_config, schema)
-        self.model_links = EdiosModelLinksRepo(db_config, schema)
-        self.embeddings = EdiosEmbeddingsRepo(db_config, schema)
+        self.experiment = EidosExperimentRepo(db_config, schema)
+        self.ledger = EidosLedgerRepo(db_config, schema)
+        self.trades = EidosTradesRepo(db_config, schema)
+        self.model_outputs = EidosModelOutputsRepo(db_config, schema)
+        self.model_links = EidosModelLinksRepo(db_config, schema)
+        self.embeddings = EidosEmbeddingsRepo(db_config, schema)
 
     def save_backtest_results(
         self,
@@ -1007,7 +1015,6 @@ class EdiosRepo:
         Returns:
             Dictionary with counts of inserted records for each table.
         """
-        import logging
         logger = logging.getLogger(__name__)
         
         counts = {}

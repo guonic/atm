@@ -25,7 +25,7 @@ streamlit run python/nq/analysis/eidos/visualization.py
 source .venv/bin/activate
 
 # 运行启动脚本
-python python/examples/edios_dashboard.py
+python python/examples/eidos_dashboard.py
 ```
 
 ### 方法 3: 指定配置文件
