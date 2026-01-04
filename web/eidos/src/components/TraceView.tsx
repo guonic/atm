@@ -2,6 +2,7 @@ import { useState } from 'react'
 import PerformancePanel from './PerformancePanel'
 import TradeStatsPanel from './TradeStatsPanel'
 import NavChart from './NavChart'
+import TradesTable from './TradesTable'
 
 interface TraceViewProps {
   expId: string | null
@@ -74,20 +75,20 @@ function TraceView({ expId, loading, onModuleChange }: TraceViewProps) {
       {/* 内容区域 */}
       <div className="flex-1 overflow-y-auto">
         {selectedModule === 'overview' && (
-          <div className="space-y-6 p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-3 p-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <PerformancePanel expId={expId} />
               <TradeStatsPanel expId={expId} />
             </div>
-            <div className="bg-eidos-surface glass-effect rounded-lg border border-eidos-muted/20 p-6">
+            <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
               <NavChart expId={expId} />
             </div>
           </div>
         )}
 
         {selectedModule === 'performance' && (
-          <div className="space-y-6 p-6">
-            <div className="bg-eidos-surface glass-effect rounded-lg border border-eidos-muted/20 p-6">
+          <div className="space-y-3 p-3">
+            <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
               <NavChart expId={expId} />
             </div>
             <PerformancePanel expId={expId} />
@@ -95,10 +96,10 @@ function TraceView({ expId, loading, onModuleChange }: TraceViewProps) {
         )}
 
         {selectedModule === 'trades' && (
-          <div className="p-6">
-            <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-6">
-              <h2 className="text-lg font-semibold mb-4 text-eidos-gold">交易明细</h2>
-              <p className="text-eidos-muted">交易明细表格（待实现）</p>
+          <div className="p-3">
+            <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
+              <h2 className="text-sm font-semibold mb-3 text-eidos-gold">交易明细</h2>
+              <TradesTable expId={expId} />
             </div>
           </div>
         )}

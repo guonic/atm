@@ -466,6 +466,9 @@ class EidosTradesRepo:
         if not trades_data:
             return 0
 
+        logger = logging.getLogger(__name__)
+        logger.info(f"Inserting {len(trades_data)} trades for exp_id: {exp_id}")
+        
         engine = self._get_engine()
         total_inserted = 0
 
@@ -502,10 +505,21 @@ class EidosTradesRepo:
                 }
                 for record in batch
             ]
-            with engine.begin() as conn:
-                result = conn.execute(sql, rows)
-                total_inserted += result.rowcount or len(rows)
+            
+            # Log first row for debugging
+            if i == 0 and rows:
+                logger.debug(f"First trade row exp_id: {rows[0].get('exp_id')}, symbol: {rows[0].get('symbol')}")
+            
+            try:
+                with engine.begin() as conn:
+                    result = conn.execute(sql, rows)
+                    total_inserted += result.rowcount or len(rows)
+            except Exception as e:
+                logger.error(f"Failed to insert trades batch {i//batch_size + 1}: {e}", exc_info=True)
+                logger.error(f"exp_id: {exp_id}, batch size: {len(batch)}, first row: {rows[0] if rows else 'empty'}")
+                raise
 
+        logger.info(f"Successfully inserted {total_inserted} trades for exp_id: {exp_id}")
         return total_inserted
 
     def get_trades(
@@ -527,29 +541,33 @@ class EidosTradesRepo:
         Returns:
             List of trade records.
         """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Getting trades for exp_id: {exp_id}, symbol: {symbol}, start_time: {start_time}, end_time: {end_time}")
+        
         engine = self._get_engine()
-        sql = f"""
-            SELECT trade_id, exp_id, symbol, deal_time, side, price, amount,
-                   rank_at_deal, score_at_deal, reason, pnl_ratio, hold_days, created_at
-            FROM "{self.schema}"."{self.table_name}"
-            WHERE exp_id = :exp_id
-        """
+        sql_parts = [
+            f'SELECT trade_id, exp_id, symbol, deal_time, side, price, amount,',
+            f'       rank_at_deal, score_at_deal, reason, pnl_ratio, hold_days, created_at',
+            f'FROM "{self.schema}"."{self.table_name}"',
+            f'WHERE exp_id = :exp_id'
+        ]
         params = {"exp_id": exp_id}
 
         if start_time:
-            sql += " AND deal_time >= :start_time"
+            sql_parts.append("AND deal_time >= :start_time")
             params["start_time"] = start_time
         if end_time:
-            sql += " AND deal_time <= :end_time"
+            sql_parts.append("AND deal_time <= :end_time")
             params["end_time"] = end_time
         if symbol:
-            sql += " AND symbol = :symbol"
+            sql_parts.append("AND symbol = :symbol")
             params["symbol"] = symbol
 
-        sql += " ORDER BY deal_time ASC;"
+        sql_parts.append("ORDER BY deal_time ASC")
+        sql = text(" ".join(sql_parts))
 
         with engine.connect() as conn:
-            result = conn.execute(text(sql), params)
+            result = conn.execute(sql, params)
             # Map 'side' column to 'direction' for model compatibility
             trades = []
             for row in result:
@@ -557,6 +575,15 @@ class EidosTradesRepo:
                 if "side" in trade_dict:
                     trade_dict["direction"] = trade_dict.pop("side")
                 trades.append(trade_dict)
+            
+            logger.info(f"Found {len(trades)} trades for exp_id: {exp_id}")
+            if len(trades) == 0:
+                # Debug: Check if there are any trades with this exp_id
+                debug_sql = text(f'SELECT COUNT(*) as count FROM "{self.schema}"."{self.table_name}" WHERE exp_id = :exp_id')
+                debug_result = conn.execute(debug_sql, {"exp_id": exp_id})
+                debug_row = debug_result.fetchone()
+                logger.warning(f"Debug: Total trades in DB for exp_id {exp_id}: {debug_row[0] if debug_row else 0}")
+            
             return trades
 
 

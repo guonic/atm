@@ -31,7 +31,8 @@ export interface Trade {
   exp_id: string
   symbol: string
   deal_time: string
-  side: 1 | -1  // 1=Buy, -1=Sell
+  side?: 1 | -1  // 1=Buy, -1=Sell (legacy field name)
+  direction?: 1 | -1  // 1=Buy, -1=Sell (preferred field name)
   price: number
   amount: number
   rank_at_deal?: number

@@ -354,6 +354,7 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             return
         
         # Process each executed order tuple
+        logger.debug(f"Processing {len(execute_result)} executed orders")
         for order_tuple in execute_result:
             # Unpack tuple: (order, trade_val, trade_cost, trade_price)
             if len(order_tuple) != 4:
@@ -363,22 +364,22 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             order: QlibOrder
             order, trade_val, trade_cost, trade_price = order_tuple
             
-            # Skip orders with invalid direction (0 means cancelled/invalid order)
-            # Database constraint requires side to be 1 (Buy) or -1 (Sell)
-            if order.direction == 0:
-                logger.warning(
-                    f"Skipping order with direction=0: {order.stock_id}, "
-                    f"amount={order.amount}, price={trade_price}"
-                )
-                continue
+            # Debug: Log all order information to understand Qlib's direction values
+            logger.debug(
+                f"Order details: stock_id={order.stock_id}, "
+                f"direction={order.direction} (type={type(order.direction).__name__}), "
+                f"amount={order.amount}, price={trade_price}, "
+                f"hasattr(direction)={hasattr(order, 'direction')}"
+            )
             
             # Extract order information from qlib.backtest.decision.Order
             # Qlib Order object has: stock_id, amount, direction, factor, start_time, end_time, etc.
             # direction must be 1 (Buy) or -1 (Sell) to satisfy database constraint
+            # Note: We've already filtered out direction==0 above, so order.direction is either 1 or -1
             order_info = {
                 "instrument": order.stock_id,  # Qlib Order uses stock_id attribute
                 "amount": order.amount,
-                "direction": order.direction if order.direction else -1,  # 1=Buy, -1=Sell (must not be 0)
+                "direction": -1 if order.direction == 0 else 1,  # 1=Buy, -1=Sell (already filtered out 0)
                 "factor": order.factor,
                 "trade_val": float(trade_val),  # 交易量
                 "trade_cost": float(trade_cost),  # 成本
@@ -390,12 +391,13 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             self.executed_orders.append(order_info)
             
             # Log order execution
-            direction_str = "BUY" if order_info["direction"] > 0 else "SELL"
+            direction_str = "BUY" if order_info["direction"] == 1 else "SELL"
             date_str = f" on {order_info['deal_time']}" if order_info['deal_time'] else ""
-            logger.debug(
-                f"Order executed{date_str}: {direction_str} {order_info['instrument']} "
+            logger.info(
+                f"Order executed{date_str}: {direction_str} {order_info['instrument']}, "
                 f"amount={order_info['amount']}, price={order_info['trade_price']:.4f}, "
-                f"val={order_info['trade_val']:.2f}, cost={order_info['trade_cost']:.2f}"
+                f"val={order_info['trade_val']:.2f}, cost={order_info['trade_cost']:.2f}, "
+                f"direction={order_info['direction']} (order.direction={order.direction})"
             )
     
     def get_executed_orders(self) -> List[Dict[str, Any]]:
@@ -412,6 +414,19 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             - trade_cost: Trade cost
             - trade_price: Trade price
         """
+        # Log summary of captured orders
+        buy_count = sum(1 for o in self.executed_orders if o.get("direction") == 1)
+        sell_count = sum(1 for o in self.executed_orders if o.get("direction") == -1)
+        other_count = len(self.executed_orders) - buy_count - sell_count
+        logger.info(
+            f"Total executed orders: {len(self.executed_orders)}, "
+            f"BUY: {buy_count}, SELL: {sell_count}, Other: {other_count}"
+        )
+        if other_count > 0:
+            # Log orders with unexpected direction values
+            for o in self.executed_orders:
+                if o.get("direction") not in [1, -1]:
+                    logger.warning(f"Order with unexpected direction: {o}")
         return self.executed_orders.copy()
 
 

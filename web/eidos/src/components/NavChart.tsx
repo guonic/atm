@@ -37,8 +37,8 @@ function NavChart({ expId }: NavChartProps) {
   if (loading) {
     return (
       <div>
-        <h2 className="text-lg font-semibold mb-4 text-eidos-gold">净值曲线</h2>
-        <div className="text-eidos-muted">加载中...</div>
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+        <div className="text-eidos-muted text-xs">加载中...</div>
       </div>
     )
   }
@@ -46,52 +46,51 @@ function NavChart({ expId }: NavChartProps) {
   if (data.length === 0) {
     return (
       <div>
-        <h2 className="text-lg font-semibold mb-4 text-eidos-gold">净值曲线</h2>
-        <div className="text-eidos-muted">暂无数据</div>
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+        <div className="text-eidos-muted text-xs">暂无数据</div>
       </div>
     )
   }
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-4 text-eidos-gold">净值曲线</h2>
-      <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#8B949E" opacity={0.2} />
+      <h2 className="text-sm font-semibold mb-3 text-eidos-gold">净值曲线</h2>
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#333" opacity={0.3} />
           <XAxis 
             dataKey="date" 
-            tick={{ fontSize: 12, fill: '#8B949E' }}
+            tick={{ fontSize: 10, fill: '#8B949E' }}
             angle={-45}
             textAnchor="end"
-            height={80}
-            stroke="#8B949E"
+            height={60}
           />
           <YAxis 
-            tick={{ fontSize: 12, fill: '#8B949E' }}
-            label={{ value: '净值', angle: -90, position: 'insideLeft', fill: '#8B949E' }}
-            stroke="#8B949E"
+            tick={{ fontSize: 10, fill: '#8B949E' }}
+            label={{ value: '净值', angle: -90, position: 'insideLeft', fill: '#8B949E', style: { fontSize: 10 } }}
           />
           <Tooltip 
             contentStyle={{
               backgroundColor: '#161B22',
-              border: '1px solid #8B949E',
+              border: 'none',
               borderRadius: '8px',
-              color: '#fff',
+              color: '#8B949E',
+              padding: '8px',
             }}
             formatter={(value: number) => value.toFixed(4)}
             labelFormatter={(label) => `日期: ${label}`}
           />
           <Legend 
-            wrapperStyle={{ color: '#8B949E' }}
+            wrapperStyle={{ color: '#8B949E', fontSize: '10px' }}
           />
           <Line 
             type="monotone" 
             dataKey="nav" 
             stroke="#00F2FF" 
-            strokeWidth={2}
+            strokeWidth={1.5}
             name="净值"
             dot={false}
-            activeDot={{ r: 4, fill: '#00F2FF' }}
+            activeDot={{ r: 3, fill: '#00F2FF' }}
           />
         </LineChart>
       </ResponsiveContainer>

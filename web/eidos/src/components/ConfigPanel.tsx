@@ -118,19 +118,25 @@ function ConfigPanel({ experiments, selectedExpId, onSelectExp, currentSubsystem
                 <h3 className="text-sm font-medium text-eidos-muted mb-3">交易筛选</h3>
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs text-eidos-muted mb-1">交易方向</label>
-                    <select className="w-full px-2 py-1 bg-eidos-bg border border-eidos-muted/30 rounded text-white text-sm">
-                      <option>全部</option>
-                      <option>买入</option>
-                      <option>卖出</option>
-                    </select>
-                  </div>
-                  <div>
                     <label className="block text-xs text-eidos-muted mb-1">股票代码</label>
                     <input
                       type="text"
                       placeholder="如: 000001.SZ"
-                      className="w-full px-2 py-1 bg-eidos-bg border border-eidos-muted/30 rounded text-white text-sm placeholder-eidos-muted"
+                      className="w-full px-2 py-1 bg-eidos-bg border border-eidos-muted/30 rounded text-white text-sm placeholder-eidos-muted focus:outline-none focus:ring-2 focus:ring-eidos-gold focus:border-eidos-gold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-eidos-muted mb-1">开始日期</label>
+                    <input
+                      type="date"
+                      className="w-full px-2 py-1 bg-eidos-bg border border-eidos-muted/30 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-eidos-gold focus:border-eidos-gold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-eidos-muted mb-1">结束日期</label>
+                    <input
+                      type="date"
+                      className="w-full px-2 py-1 bg-eidos-bg border border-eidos-muted/30 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-eidos-gold focus:border-eidos-gold"
                     />
                   </div>
                 </div>

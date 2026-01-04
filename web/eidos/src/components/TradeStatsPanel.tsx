@@ -28,53 +28,53 @@ function TradeStatsPanel({ expId }: TradeStatsPanelProps) {
 
   if (loading) {
     return (
-      <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-6">
-        <h2 className="text-lg font-semibold mb-4 text-eidos-gold">交易统计</h2>
-        <div className="text-eidos-muted">加载中...</div>
+      <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">交易统计</h2>
+        <div className="text-eidos-muted text-xs">加载中...</div>
       </div>
     )
   }
 
   if (!stats) {
     return (
-      <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-6">
-        <h2 className="text-lg font-semibold mb-4 text-eidos-gold">交易统计</h2>
-        <div className="text-eidos-muted">暂无数据</div>
+      <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
+        <h2 className="text-sm font-semibold mb-3 text-eidos-gold">交易统计</h2>
+        <div className="text-eidos-muted text-xs">暂无数据</div>
       </div>
     )
   }
 
   return (
-    <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-6">
-      <h2 className="text-lg font-semibold mb-4 text-eidos-gold">交易统计</h2>
-      <div className="grid grid-cols-2 gap-4">
+    <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
+      <h2 className="text-sm font-semibold mb-3 text-eidos-gold">交易统计</h2>
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className="text-sm text-eidos-muted mb-1">总交易次数</div>
-          <div className="text-2xl font-bold font-mono text-white">
+          <div className="text-xs text-eidos-muted mb-0.5">总交易次数</div>
+          <div className="text-lg font-bold font-mono text-white">
             {stats.total_trades}
           </div>
         </div>
         <div>
-          <div className="text-sm text-eidos-muted mb-1">买入次数</div>
-          <div className="text-2xl font-bold font-mono text-eidos-accent">
+          <div className="text-xs text-eidos-muted mb-0.5">买入次数</div>
+          <div className="text-lg font-bold font-mono text-eidos-accent">
             {stats.buy_count}
           </div>
         </div>
         <div>
-          <div className="text-sm text-eidos-muted mb-1">卖出次数</div>
-          <div className="text-2xl font-bold font-mono text-eidos-danger">
+          <div className="text-xs text-eidos-muted mb-0.5">卖出次数</div>
+          <div className="text-lg font-bold font-mono text-eidos-danger">
             {stats.sell_count}
           </div>
         </div>
         <div>
-          <div className="text-sm text-eidos-muted mb-1">胜率</div>
-          <div className="text-2xl font-bold font-mono text-eidos-gold">
+          <div className="text-xs text-eidos-muted mb-0.5">胜率</div>
+          <div className="text-lg font-bold font-mono text-eidos-gold">
             {(stats.win_rate * 100).toFixed(2)}%
           </div>
         </div>
         <div className="col-span-2">
-          <div className="text-sm text-eidos-muted mb-1">平均持仓天数</div>
-          <div className="text-2xl font-bold font-mono text-white">
+          <div className="text-xs text-eidos-muted mb-0.5">平均持仓天数</div>
+          <div className="text-lg font-bold font-mono text-white">
             {stats.avg_hold_days.toFixed(1)} 天
           </div>
         </div>

@@ -129,25 +129,37 @@ async def get_trades_handler(
     Returns:
         List of trades.
     """
+    logger.info(f"Getting trades for exp_id: {exp_id}, symbol: {symbol}, start_date: {start_date}, end_date: {end_date}")
+    
     repo = get_eidos_repo()
     trades = repo.trades.get_trades(
         exp_id, start_time=start_date, end_time=end_date, symbol=symbol
     )
     
+    logger.info(f"Retrieved {len(trades)} trades from repository")
+    
     result = []
-    for trade in trades:
+    for idx, trade in enumerate(trades):
         try:
-            # Convert side to direction for API response
-            if "side" in trade:
+            # Ensure we have 'side' field for Pydantic (it uses alias="side")
+            # The repository already converts 'side' to 'direction', but Pydantic needs 'side' due to alias
+            if "direction" in trade and "side" not in trade:
+                trade["side"] = trade["direction"]
+            elif "side" in trade and "direction" not in trade:
                 trade["direction"] = trade["side"]
+            
             # Convert datetime strings if needed
             if isinstance(trade.get("deal_time"), str):
                 trade["deal_time"] = datetime.fromisoformat(trade["deal_time"].replace("Z", "+00:00"))
+            # Ensure exp_id is present
+            if "exp_id" not in trade:
+                trade["exp_id"] = exp_id
             result.append(TradeResponse(**trade))
         except Exception as e:
-            logger.warning(f"Failed to parse trade: {e}")
+            logger.warning(f"Failed to parse trade {idx}: {e}, trade data: {trade}", exc_info=True)
             continue
     
+    logger.info(f"Successfully parsed {len(result)} trades for exp_id: {exp_id}")
     return result
 
 
@@ -247,6 +259,8 @@ async def get_trade_stats_handler(exp_id: str) -> TradeStatsResponse:
     # Get all trades
     trades = repo.trades.get_trades(exp_id)
     
+    logger.info(f"Retrieved {len(trades)} trades for stats calculation")
+    
     if not trades:
         return TradeStatsResponse(
             total_trades=0,
@@ -256,8 +270,20 @@ async def get_trade_stats_handler(exp_id: str) -> TradeStatsResponse:
             avg_hold_days=0.0,
         )
     
-    buy_count = sum(1 for t in trades if t.get("side") == 1)
-    sell_count = sum(1 for t in trades if t.get("side") == -1)
+    # Get side/direction value - repository converts 'side' to 'direction', but may have both
+    buy_count = 0
+    sell_count = 0
+    for t in trades:
+        # Check both 'side' and 'direction' fields
+        side_value = t.get("side") or t.get("direction")
+        if side_value == 1:
+            buy_count += 1
+        elif side_value == -1:
+            sell_count += 1
+        else:
+            logger.warning(f"Trade {t.get('trade_id')} has invalid side/direction: {side_value}")
+    
+    logger.info(f"Buy count: {buy_count}, Sell count: {sell_count}, Total: {len(trades)}")
     
     # Calculate win rate from trades with pnl_ratio
     winning_trades = [t for t in trades if t.get("pnl_ratio") and t.get("pnl_ratio", 0) > 0]
