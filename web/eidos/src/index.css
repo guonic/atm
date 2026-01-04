@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #0B0E14; /* 深海黑背景 */
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #0B0E14;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  background-color: #0B0E14;
+}
+
+/* 玻璃霓虹效果 */
+@layer utilities {
+  .glass-effect {
+    background: rgba(22, 27, 34, 0.4);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  
+  .neon-glow {
+    box-shadow: 0 0 20px rgba(0, 242, 255, 0.2),
+                0 0 40px rgba(0, 242, 255, 0.1);
+  }
+  
+  .gold-glow {
+    box-shadow: 0 0 15px rgba(197, 160, 89, 0.25),
+                0 0 30px rgba(197, 160, 89, 0.15);
+  }
+}
+
+/* 柔和的阴影效果 */
+.shadow-soft {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3),
+              0 0 1px rgba(255, 255, 255, 0.05);
+}
+
