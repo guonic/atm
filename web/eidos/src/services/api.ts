@@ -60,5 +60,32 @@ export async function getTradeStats(expId: string): Promise<TradeStats> {
   return response.data
 }
 
+/**
+ * 获取股票的K线数据
+ */
+export interface KlineData {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export async function getStockKline(
+  expId: string,
+  symbol: string,
+  startDate?: string,
+  endDate?: string
+): Promise<KlineData[]> {
+  const response = await api.get<KlineData[]>(`/experiments/${expId}/kline/${symbol}`, {
+    params: {
+      start_date: startDate,
+      end_date: endDate,
+    },
+  })
+  return response.data
+}
+
 export default api
 

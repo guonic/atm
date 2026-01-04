@@ -6,6 +6,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
+import pandas as pd
 
 from nq.api.rest.eidos.dependencies import get_eidos_repo
 from nq.api.rest.eidos.schemas import (
@@ -300,4 +301,146 @@ async def get_trade_stats_handler(exp_id: str) -> TradeStatsResponse:
         win_rate=win_rate,
         avg_hold_days=avg_hold_days,
     )
+
+
+async def get_stock_kline_handler(
+    exp_id: str,
+    symbol: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> List[dict]:
+    """
+    Get K-line (OHLCV) data for a stock symbol.
+    
+    This function retrieves stock price data from the database or Qlib.
+    If the experiment has date range, it will use that as default filter.
+    
+    Args:
+        exp_id: Experiment ID.
+        symbol: Stock symbol (e.g., "000001.SZ").
+        start_date: Optional start date filter.
+        end_date: Optional end date filter.
+    
+    Returns:
+        List of K-line data points with date, open, high, low, close, volume.
+    """
+    from fastapi import HTTPException
+    from datetime import datetime
+    from nq.repo.kline_repo import StockKlineDayRepo
+    from nq.api.rest.eidos.dependencies import get_db_config
+    
+    repo = get_eidos_repo()
+    
+    # Get experiment to get date range
+    exp = repo.experiment.get_experiment(exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail=f"Experiment {exp_id} not found")
+    
+    # Use experiment date range if not provided
+    if not start_date:
+        exp_start = exp.get("start_date")
+        if isinstance(exp_start, str):
+            start_date = date.fromisoformat(exp_start)
+        elif exp_start:
+            start_date = exp_start
+    
+    if not end_date:
+        exp_end = exp.get("end_date")
+        if isinstance(exp_end, str):
+            end_date = date.fromisoformat(exp_end)
+        elif exp_end:
+            end_date = exp_end
+    
+    try:
+        # Try to get data from database first
+        db_config = get_db_config()
+        kline_repo = StockKlineDayRepo(db_config, schema="quant")
+        
+        # Convert symbol format: "000001.SZ" -> "000001.SZ" (keep as is for now)
+        # If needed, convert to ts_code format
+        ts_code = symbol
+        
+        # Convert date to datetime for repo query
+        start_datetime = datetime.combine(start_date, datetime.min.time()) if start_date else None
+        end_datetime = datetime.combine(end_date, datetime.max.time()) if end_date else None
+        
+        klines = kline_repo.get_by_ts_code(
+            ts_code=ts_code,
+            start_time=start_datetime,
+            end_time=end_datetime,
+        )
+        
+        if klines:
+            # Convert to list of dictionaries
+            result = []
+            for kline in klines:
+                trade_date = kline.trade_date
+                if isinstance(trade_date, datetime):
+                    date_str = trade_date.strftime("%Y-%m-%d")
+                elif isinstance(trade_date, date):
+                    date_str = trade_date.strftime("%Y-%m-%d")
+                else:
+                    date_str = str(trade_date)
+                
+                result.append({
+                    "date": date_str,
+                    "open": float(kline.open) if kline.open else 0.0,
+                    "high": float(kline.high) if kline.high else 0.0,
+                    "low": float(kline.low) if kline.low else 0.0,
+                    "close": float(kline.close) if kline.close else 0.0,
+                    "volume": float(kline.volume) if kline.volume else 0.0,
+                })
+            
+            # Sort by date
+            result.sort(key=lambda x: x["date"])
+            logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from database")
+            return result
+        
+        # Fallback to Qlib if database doesn't have data
+        logger.info(f"No database K-line data found for {symbol}, trying Qlib...")
+        import qlib
+        from qlib.data import D
+        
+        # Initialize Qlib if not already initialized
+        try:
+            qlib.init()
+        except:
+            pass  # Already initialized
+        
+        # Fetch K-line data from Qlib
+        start_str = start_date.strftime("%Y-%m-%d") if start_date else None
+        end_str = end_date.strftime("%Y-%m-%d") if end_date else None
+        
+        # Get OHLCV data
+        fields = ["$open", "$high", "$low", "$close", "$volume"]
+        data = D.features(
+            [symbol],
+            fields,
+            start_time=start_str,
+            end_time=end_str,
+            freq="day",
+        )
+        
+        if data.empty:
+            logger.warning(f"No K-line data found for {symbol} in date range {start_str} to {end_str}")
+            return []
+        
+        # Convert to list of dictionaries
+        result = []
+        for idx, row in data.iterrows():
+            result.append({
+                "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx),
+                "open": float(row["$open"]) if pd.notna(row["$open"]) else 0.0,
+                "high": float(row["$high"]) if pd.notna(row["$high"]) else 0.0,
+                "low": float(row["$low"]) if pd.notna(row["$low"]) else 0.0,
+                "close": float(row["$close"]) if pd.notna(row["$close"]) else 0.0,
+                "volume": float(row["$volume"]) if pd.notna(row["$volume"]) else 0.0,
+            })
+        
+        logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from Qlib")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to get K-line data for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve K-line data: {str(e)}")
 

@@ -129,3 +129,25 @@ async def get_trade_stats(exp_id: str):
     """
     return await handlers.get_trade_stats_handler(exp_id)
 
+
+@router.get("/experiments/{exp_id}/kline/{symbol}")
+async def get_stock_kline(
+    exp_id: str,
+    symbol: str,
+    start_date: Optional[date] = Query(None, description="Start date filter"),
+    end_date: Optional[date] = Query(None, description="End date filter"),
+):
+    """
+    Get K-line (OHLCV) data for a stock symbol within an experiment's date range.
+    
+    Args:
+        exp_id: Experiment ID.
+        symbol: Stock symbol (e.g., "000001.SZ").
+        start_date: Optional start date filter.
+        end_date: Optional end date filter.
+    
+    Returns:
+        List of K-line data points with date, open, high, low, close, volume.
+    """
+    return await handlers.get_stock_kline_handler(exp_id, symbol, start_date=start_date, end_date=end_date)
+

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getTrades } from '@/services/api'
 import type { Trade } from '@/types/eidos'
 import { format } from 'date-fns'
+import StockKlineChart from './StockKlineChart'
 
 interface TradesTableProps {
   expId: string
@@ -11,10 +12,16 @@ interface TradesTableProps {
 }
 
 function TradesTable({ expId, symbolFilter, startDate, endDate }: TradesTableProps) {
-  const [trades, setTrades] = useState<Trade[]>([])
+  const [allTrades, setAllTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(50)
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
+  
+  // Filter trades by selected symbol
+  const trades = selectedSymbol 
+    ? allTrades.filter(t => t.symbol === selectedSymbol)
+    : allTrades
 
   useEffect(() => {
     loadTrades()
@@ -28,13 +35,18 @@ function TradesTable({ expId, symbolFilter, startDate, endDate }: TradesTablePro
         start_date: startDate || undefined,
         end_date: endDate || undefined,
       })
-      setTrades(data)
+      setAllTrades(data)
     } catch (error) {
       console.error('Failed to load trades:', error)
     } finally {
       setLoading(false)
     }
   }
+  
+  // Reset page when symbol changes
+  useEffect(() => {
+    setPage(1)
+  }, [selectedSymbol])
 
   if (loading) {
     return (
@@ -60,11 +72,38 @@ function TradesTable({ expId, symbolFilter, startDate, endDate }: TradesTablePro
 
   return (
     <div className="space-y-2">
+      {/* K线图 - 显示在列表上方 */}
+      {selectedSymbol && (
+        <div className="mb-4 border border-eidos-muted/20 rounded-lg overflow-hidden">
+          <div className="p-2 bg-eidos-surface/50 border-b border-eidos-muted/20 flex items-center justify-between">
+            <div>
+              <span className="text-sm font-semibold text-eidos-gold">{selectedSymbol}</span>
+              <span className="text-xs text-eidos-muted ml-2">K线图与交易点位</span>
+            </div>
+            <button
+              onClick={() => setSelectedSymbol(null)}
+              className="text-xs text-eidos-muted hover:text-white transition-colors px-2 py-1 rounded"
+            >
+              取消筛选
+            </button>
+          </div>
+          <div className="bg-eidos-surface/30">
+            <StockKlineChart
+              expId={expId}
+              symbol={selectedSymbol}
+              onClose={() => setSelectedSymbol(null)}
+              embedded={true}
+            />
+          </div>
+        </div>
+      )}
+      
       {/* 统计信息 */}
       <div className="flex items-center justify-between text-[10px] text-eidos-muted">
         <div>
           共 {trades.length} 笔交易
-          {symbolFilter && <span className="ml-1">（已筛选: {symbolFilter}）</span>}
+          {selectedSymbol && <span className="ml-1">（已筛选: {selectedSymbol}）</span>}
+          {symbolFilter && !selectedSymbol && <span className="ml-1">（已筛选: {symbolFilter}）</span>}
         </div>
         <div>
           第 {page} / {totalPages} 页
@@ -120,8 +159,20 @@ function TradesTable({ expId, symbolFilter, startDate, endDate }: TradesTablePro
                   <td className="py-1 px-1.5 text-[10px] text-white font-mono">
                     {format(new Date(trade.deal_time), 'yyyy-MM-dd HH:mm:ss')}
                   </td>
-                  <td className="py-1 px-1.5 text-[10px] text-white font-mono">
-                    {trade.symbol}
+                  <td 
+                    className="py-1 px-1.5 text-[10px] text-white font-mono cursor-pointer hover:text-eidos-accent transition-colors"
+                    onClick={() => {
+                      if (selectedSymbol === trade.symbol) {
+                        setSelectedSymbol(null)
+                      } else {
+                        setSelectedSymbol(trade.symbol)
+                      }
+                    }}
+                    title={selectedSymbol === trade.symbol ? "点击取消筛选" : "点击查看K线图并筛选"}
+                  >
+                    <span className={selectedSymbol === trade.symbol ? "text-eidos-gold font-bold" : ""}>
+                      {trade.symbol}
+                    </span>
                   </td>
                   <td className={`py-1 px-1.5 text-[10px] font-medium text-right ${directionColor}`}>
                     {direction}
