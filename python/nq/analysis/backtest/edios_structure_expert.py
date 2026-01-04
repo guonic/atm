@@ -40,6 +40,7 @@ def extract_ledger_from_backtest_results(
 
     portfolio_metrics = qlib_result.portfolio_metrics
     metric_df = portfolio_metrics.metric_df
+    position_details = portfolio_metrics.position_details
     
     # Calculate cumulative NAV from returns
     returns = metric_df["return"]
@@ -48,18 +49,29 @@ def extract_ledger_from_backtest_results(
     for date_val, nav_val in nav.items():
         date_obj = to_date(date_val)
 
-        # Extract metrics directly - assume columns exist
-        cash = metric_df.loc[date_val, "cash"]
-        market_value = metric_df.loc[date_val, "market_value"]
-        deal_amount = metric_df.loc[date_val, "deal_amount"]
-        turnover_rate = metric_df.loc[date_val, "turnover_rate"]
-        pos_count = metric_df.loc[date_val, "pos_count"]
+        # Extract metrics from DataFrame if available, otherwise from position_details
+        cash = metric_df.loc[date_val, "cash"] if "cash" in metric_df.columns else None
+        market_value = metric_df.loc[date_val, "market_value"] if "market_value" in metric_df.columns else None
+        deal_amount = metric_df.loc[date_val, "deal_amount"] if "deal_amount" in metric_df.columns else 0.0
+        turnover_rate = metric_df.loc[date_val, "turnover_rate"] if "turnover_rate" in metric_df.columns else 0.0
+        pos_count = metric_df.loc[date_val, "pos_count"] if "pos_count" in metric_df.columns else 0
+        
+        # If missing, get from position_details
+        if position_details is not None:
+            pos = position_details.get_position(date_obj)
+            if pos is not None:
+                if cash is None:
+                    cash = pos.cash
+                if market_value is None:
+                    market_value = pos.market_value
+                if pos_count == 0:
+                    pos_count = len(pos.get_holdings_dict())
 
         ledger_data.append({
             "date": date_obj,
             "nav": float(nav_val),
-            "cash": float(cash),
-            "market_value": float(market_value),
+            "cash": float(cash) if cash is not None else 0.0,
+            "market_value": float(market_value) if market_value is not None else 0.0,
             "deal_amount": float(deal_amount),
             "turnover_rate": float(turnover_rate),
             "pos_count": int(pos_count),
@@ -196,8 +208,15 @@ def extract_model_outputs_from_predictions(
     for date_val in predictions.index.get_level_values(0).unique():
         date_predictions = predictions.loc[date_val]
 
-        # Convert to DataFrame if Series
-        date_predictions_df = date_predictions.to_frame("score")
+        # Convert to DataFrame if Series, otherwise use directly
+        if isinstance(date_predictions, pd.Series):
+            date_predictions_df = date_predictions.to_frame("score")
+        else:
+            # Already a DataFrame - ensure it has 'score' column
+            date_predictions_df = date_predictions.copy()
+            if "score" not in date_predictions_df.columns:
+                # If no 'score' column, use first column
+                date_predictions_df = date_predictions_df.iloc[:, [0]].rename(columns={date_predictions_df.columns[0]: "score"})
 
         # Sort by score descending and assign ranks
         date_predictions_sorted = date_predictions_df.sort_values("score", ascending=False)
@@ -242,19 +261,22 @@ def extract_model_links_from_graph(
 
 def extract_embeddings_from_predictions(
     predictions: pd.DataFrame,
-    embeddings_dict: Dict[Tuple[str, str], np.ndarray],
+    embeddings_dict: Optional[Dict[Tuple[str, str], np.ndarray]],
 ) -> List[Dict[str, Any]]:
     """
     Extract embeddings from predictions and embeddings dictionary.
 
     Args:
         predictions: Predictions DataFrame.
-        embeddings_dict: Dictionary mapping (date, symbol) to embedding vector (optional).
+        embeddings_dict: Dictionary mapping (date, symbol) to embedding vector (optional, can be None).
 
     Returns:
         List of embedding records.
     """
     embeddings_data = []
+
+    if embeddings_dict is None:
+        return embeddings_data
 
     for (date_val, symbol), embedding in embeddings_dict.items():
         date_obj = to_date(date_val)
@@ -321,8 +343,8 @@ def save_structure_expert_backtest_to_edios(
     embeddings_data = extract_embeddings_from_predictions(predictions, embeddings_dict)
     logger.info(f"Extracted {len(embeddings_data)} embedding records")
 
-    # Save all data using writer
-    counts = writer.save_batch(
+    # Save all data using repo
+    counts = writer.repo.save_backtest_results(
         exp_id=exp_id,
         ledger_data=ledger_data,
         trades_data=trades_data,

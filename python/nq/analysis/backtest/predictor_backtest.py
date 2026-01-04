@@ -6,13 +6,12 @@ Provides backtest functionality for prediction models.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Optional
 
 import pandas as pd
 
 from nq.repo.kline_repo import StockKlineDayRepo
-from nq.trading.predictor.base import BasePredictor, PredictionResult
-
+from nq.trading.predictor.base import BasePredictor
 from .base import BaseBacktester, BacktestResult
 from .metrics import BacktestMetrics
 
