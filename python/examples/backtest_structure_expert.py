@@ -2350,6 +2350,7 @@ def main():
             skip_auto_detect=skip_auto_detect,
         )
 
+
         # Extract portfolio_metric and indicator from results
         portfolio_metric = results.get("portfolio_metric")
         indicator = results.get("indicator")
