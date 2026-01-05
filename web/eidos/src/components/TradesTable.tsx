@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { getTrades } from '@/services/api'
 import type { Trade } from '@/types/eidos'
 import { format } from 'date-fns'
-import StockKlineChart from './StockKlineChart'
+import { BacktestChart } from './backtest/BacktestChart'
 
 interface TradesTableProps {
   expId: string
@@ -74,27 +74,13 @@ function TradesTable({ expId, symbolFilter, startDate, endDate }: TradesTablePro
     <div className="space-y-2">
       {/* K线图 - 显示在列表上方 */}
       {selectedSymbol && (
-        <div className="mb-4 border border-eidos-muted/20 rounded-lg overflow-hidden">
-          <div className="p-2 bg-eidos-surface/50 border-b border-eidos-muted/20 flex items-center justify-between">
-            <div>
-              <span className="text-sm font-semibold text-eidos-gold">{selectedSymbol}</span>
-              <span className="text-xs text-eidos-muted ml-2">K线图与交易点位</span>
-            </div>
-            <button
-              onClick={() => setSelectedSymbol(null)}
-              className="text-xs text-eidos-muted hover:text-white transition-colors px-2 py-1 rounded"
-            >
-              取消筛选
-            </button>
-          </div>
-          <div className="bg-eidos-surface/30">
-            <StockKlineChart
-              expId={expId}
-              symbol={selectedSymbol}
-              onClose={() => setSelectedSymbol(null)}
-              embedded={true}
-            />
-          </div>
+        <div className="mb-4">
+          <BacktestChart
+            expId={expId}
+            symbol={selectedSymbol}
+            onClose={() => setSelectedSymbol(null)}
+            embedded={true}
+          />
         </div>
       )}
       

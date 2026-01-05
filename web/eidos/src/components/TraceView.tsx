@@ -98,7 +98,6 @@ function TraceView({ expId, loading, onModuleChange }: TraceViewProps) {
         {selectedModule === 'trades' && (
           <div className="p-3">
             <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
-              <h2 className="text-sm font-semibold mb-3 text-eidos-gold">交易明细</h2>
               <TradesTable expId={expId} />
             </div>
           </div>

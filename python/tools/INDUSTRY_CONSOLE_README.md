@@ -175,7 +175,3 @@ http://localhost:5000
 - **后端**: Flask (Python)
 - **前端**: Bootstrap 5, Vanilla JavaScript
 - **数据库**: PostgreSQL (通过 SQLAlchemy)
-
-
-
-
