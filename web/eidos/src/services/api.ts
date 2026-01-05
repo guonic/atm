@@ -72,16 +72,34 @@ export interface KlineData {
   volume: number
 }
 
+export interface KlineResponse {
+  kline_data: KlineData[]
+  indicators?: {
+    macd?: { macd: (number | null)[]; signal: (number | null)[]; histogram: (number | null)[] }
+    rsi?: (number | null)[]
+    bollinger?: { upper: (number | null)[]; middle: (number | null)[]; lower: (number | null)[] }
+    atr?: (number | null)[]
+    ma5?: (number | null)[]
+    ma10?: (number | null)[]
+    ma20?: (number | null)[]
+    ma30?: (number | null)[]
+  }
+  backtest_start?: string
+  backtest_end?: string
+}
+
 export async function getStockKline(
   expId: string,
   symbol: string,
   startDate?: string,
-  endDate?: string
-): Promise<KlineData[]> {
-  const response = await api.get<KlineData[]>(`/experiments/${expId}/kline/${symbol}`, {
+  endDate?: string,
+  indicators?: string[]
+): Promise<KlineResponse> {
+  const response = await api.get<KlineResponse>(`/experiments/${expId}/kline/${symbol}`, {
     params: {
       start_date: startDate,
       end_date: endDate,
+      indicators: indicators?.join(','),
     },
   })
   return response.data

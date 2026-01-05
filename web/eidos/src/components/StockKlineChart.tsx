@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react'
 import * as echarts from 'echarts'
 import { getStockKline, getTrades } from '@/services/api'
 import type { Trade } from '@/types/eidos'
-import { calculateMACD, calculateRSI, calculateBollingerBands, calculateATR, calculateSMA } from '@/utils/indicators'
 
 interface StockKlineChartProps {
   expId: string
@@ -31,10 +30,34 @@ interface KlineData {
   volume: number
 }
 
+interface IndicatorData {
+  macd?: { macd: (number | null)[]; signal: (number | null)[]; histogram: (number | null)[] }
+  rsi?: (number | null)[]
+  bollinger?: { upper: (number | null)[]; middle: (number | null)[]; lower: (number | null)[] }
+  atr?: (number | null)[]
+  ma5?: (number | null)[]
+  ma10?: (number | null)[]
+  ma20?: (number | null)[]
+  ma30?: (number | null)[]
+}
+
 function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlineChartProps) {
   const [klineData, setKlineData] = useState<KlineData[]>([])
+  const [indicatorData, setIndicatorData] = useState<IndicatorData>({})
+  const [backtestStart, setBacktestStart] = useState<string | null>(null)
+  const [backtestEnd, setBacktestEnd] = useState<string | null>(null)
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [dataRange, setDataRange] = useState<{ startDate: string | null; endDate: string | null }>({
+    startDate: null,
+    endDate: null,
+  })
+  const [visibleWindow, setVisibleWindow] = useState<{ start: number; end: number }>({ start: 0, end: 100 })
+  const [sliderButtonPosition, setSliderButtonPosition] = useState<number>(50) // Center position (0-100)
+  const isDraggingSliderRef = useRef(false)
+  const dragStartRef = useRef<{ sliderStart: number; windowStart: number; windowEnd: number } | null>(null)
+  const sliderContainerRef = useRef<HTMLDivElement>(null)
   const [indicators, setIndicators] = useState<IndicatorConfig>({
     macd: false,
     rsi: false,
@@ -48,6 +71,7 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const resizeHandlerRef = useRef<(() => void) | null>(null)
+  const dataZoomHandlerRef = useRef<((params: any) => void) | null>(null)
 
   useEffect(() => {
     loadData()
@@ -80,6 +104,18 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
         resizeHandlerRef.current = null
       }
       
+      // Remove dataZoom event listener if it exists
+      if (dataZoomHandlerRef.current && chartInstanceRef.current) {
+        try {
+          if (!chartInstanceRef.current.isDisposed()) {
+            chartInstanceRef.current.off('dataZoom', dataZoomHandlerRef.current)
+          }
+        } catch (e) {
+          // Ignore errors during disposal
+        }
+        dataZoomHandlerRef.current = null
+      }
+      
       // Dispose chart instance
       if (chartInstanceRef.current) {
         try {
@@ -92,24 +128,157 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
         chartInstanceRef.current = null
       }
     }
-  }, [klineData, trades, indicators])  // Re-render when indicators change
+  }, [klineData, trades, indicators, visibleWindow, sliderButtonPosition])  // Re-render when indicators, window, or slider change
 
-  const loadData = async () => {
+  const loadData = async (startDate?: string, endDate?: string, append: boolean = false) => {
     try {
-      setLoading(true)
-      // Load kline data and trades for this symbol
-      const [kline, symbolTrades] = await Promise.all([
-        getStockKline(expId, symbol),
+      if (append) {
+        setLoadingMore(true)
+      } else {
+        setLoading(true)
+      }
+      
+      // Determine which indicators to request
+      const indicatorList: string[] = []
+      if (indicators.macd) indicatorList.push('macd')
+      if (indicators.rsi) indicatorList.push('rsi')
+      if (indicators.bollinger) indicatorList.push('bollinger')
+      if (indicators.atr) indicatorList.push('atr')
+      if (indicators.ma5) indicatorList.push('ma5')
+      if (indicators.ma10) indicatorList.push('ma10')
+      if (indicators.ma20) indicatorList.push('ma20')
+      if (indicators.ma30) indicatorList.push('ma30')
+      
+      // Load kline data with indicators and trades for this symbol
+      const [klineResponse, symbolTrades] = await Promise.all([
+        getStockKline(expId, symbol, startDate, endDate, indicatorList.length > 0 ? indicatorList : undefined),
         getTrades(expId, { symbol }),
       ])
-      setKlineData(kline)
+      
+      if (append) {
+        // Merge new data with existing data
+        const existingDates = new Set(klineData.map(d => d.date))
+        const newKlineData = klineResponse.kline_data.filter(d => !existingDates.has(d.date))
+        
+        // Sort by date and merge
+        const mergedData = [...klineData, ...newKlineData].sort((a, b) => 
+          a.date.localeCompare(b.date)
+        )
+        setKlineData(mergedData)
+        
+        // Update data range
+        if (mergedData.length > 0) {
+          setDataRange({
+            startDate: mergedData[0].date,
+            endDate: mergedData[mergedData.length - 1].date,
+          })
+        }
+        
+        // Note: For indicators, we would need to recalculate with all data
+        // For now, we'll keep the original indicators and recalculate on next full load
+        console.log(`Loaded ${newKlineData.length} new data points (total: ${mergedData.length})`)
+      } else {
+        setKlineData(klineResponse.kline_data)
+        setIndicatorData(klineResponse.indicators || {})
+        setBacktestStart(klineResponse.backtest_start || null)
+        setBacktestEnd(klineResponse.backtest_end || null)
+        
+        // Update data range
+        if (klineResponse.kline_data.length > 0) {
+          setDataRange({
+            startDate: klineResponse.kline_data[0].date,
+            endDate: klineResponse.kline_data[klineResponse.kline_data.length - 1].date,
+          })
+          // Reset visible window and slider to initial state
+          if (!append) {
+            setVisibleWindow({ start: 0, end: 100 })
+            setSliderButtonPosition(50) // Center
+            dragStartRef.current = null
+          }
+        }
+      }
+      
+      // Always update trades (they don't change when loading more data)
       setTrades(symbolTrades)
     } catch (error) {
       console.error('Failed to load kline data:', error)
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }
+  
+  // Handle slider drag to move window
+  const handleSliderDrag = (sliderPercentage: number) => {
+    if (!isDraggingSliderRef.current && !dragStartRef.current) {
+      // Start of drag
+      isDraggingSliderRef.current = true
+      dragStartRef.current = {
+        sliderStart: sliderButtonPosition,
+        windowStart: visibleWindow.start,
+        windowEnd: visibleWindow.end,
+      }
+    }
+    
+    // Calculate drag distance (slider movement from center)
+    const dragDistance = sliderPercentage - 50 // -50 to +50
+    
+    // Calculate window size
+    const windowSize = dragStartRef.current ? 
+      (dragStartRef.current.windowEnd - dragStartRef.current.windowStart) : 
+      (visibleWindow.end - visibleWindow.start)
+    
+    // Calculate new window position based on drag distance
+    // Drag left (negative) = move window left (earlier data)
+    // Drag right (positive) = move window right (later data)
+    const windowMoveDistance = dragDistance * 2 // Scale: slider moves 50% range, window moves proportionally
+    
+    const newWindowStart = Math.max(0, Math.min(100 - windowSize, 
+      (dragStartRef.current?.windowStart || visibleWindow.start) - windowMoveDistance))
+    const newWindowEnd = newWindowStart + windowSize
+    
+    // Update visible window
+    setVisibleWindow({ start: newWindowStart, end: newWindowEnd })
+    setSliderButtonPosition(sliderPercentage)
+  }
+  
+  // Load more data when scrolling to boundaries
+  const loadMoreData = async (direction: 'left' | 'right') => {
+    if (loadingMore || !dataRange.startDate || !dataRange.endDate) return
+    
+    try {
+      setLoadingMore(true)
+      
+      if (direction === 'left') {
+        // Load earlier data (before startDate)
+        const endDate = new Date(dataRange.startDate)
+        endDate.setDate(endDate.getDate() - 1) // One day before current start
+        const startDate = new Date(endDate)
+        startDate.setDate(startDate.getDate() - 60) // Load 60 days earlier
+        
+        await loadData(startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], true)
+      } else {
+        // Load later data (after endDate)
+        const startDate = new Date(dataRange.endDate)
+        startDate.setDate(startDate.getDate() + 1) // One day after current end
+        const endDate = new Date(startDate)
+        endDate.setDate(endDate.getDate() + 60) // Load 60 days later
+        
+        await loadData(startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], true)
+      }
+    } catch (error) {
+      console.error('Failed to load more data:', error)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+  
+  // Reload data when indicators change
+  useEffect(() => {
+    if (klineData.length > 0) {
+      loadData()
+    }
+  }, [indicators])
 
   const renderChart = () => {
     if (!chartRef.current || klineData.length === 0) {
@@ -161,91 +330,67 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
     const highs = klineData.map((d) => d.high)
     const lows = klineData.map((d) => d.low)
     
-    // Calculate indicators if enabled
-    const macdData = indicators.macd ? calculateMACD(closes) : null
-    const rsiData = indicators.rsi ? calculateRSI(closes) : null
-    const bollingerData = indicators.bollinger ? calculateBollingerBands(closes) : null
-    const atrData = indicators.atr ? calculateATR(highs, lows, closes) : null
+    // Use backend-calculated indicators
+    const macdData = indicators.macd && indicatorData.macd ? indicatorData.macd : null
+    const rsiData = indicators.rsi && indicatorData.rsi ? indicatorData.rsi : null
+    const bollingerData = indicators.bollinger && indicatorData.bollinger ? indicatorData.bollinger : null
+    const atrData = indicators.atr && indicatorData.atr ? indicatorData.atr : null
+    const ma5Data = indicators.ma5 && indicatorData.ma5 ? indicatorData.ma5 : null
+    const ma10Data = indicators.ma10 && indicatorData.ma10 ? indicatorData.ma10 : null
+    const ma20Data = indicators.ma20 && indicatorData.ma20 ? indicatorData.ma20 : null
+    const ma30Data = indicators.ma30 && indicatorData.ma30 ? indicatorData.ma30 : null
     
-    // Calculate moving averages
-    const ma5Data = indicators.ma5 ? calculateSMA(closes, 5) : null
-    const ma10Data = indicators.ma10 ? calculateSMA(closes, 10) : null
-    const ma20Data = indicators.ma20 ? calculateSMA(closes, 20) : null
-    const ma30Data = indicators.ma30 ? calculateSMA(closes, 30) : null
+    // Find backtest period indices for visual distinction
+    // Normalize dates for comparison (both should be YYYY-MM-DD format)
+    const normalizeDate = (dateStr: string | null | undefined): string | null => {
+      if (!dateStr) return null
+      // Extract YYYY-MM-DD from ISO string if needed
+      return dateStr.split('T')[0]
+    }
     
-    // Debug: Log indicator data
-    console.log('=== Indicator Calculation Debug ===')
-    console.log('Indicators enabled:', indicators)
+    const normalizedBacktestStart = normalizeDate(backtestStart)
+    const normalizedBacktestEnd = normalizeDate(backtestEnd)
+    
+    const backtestStartIdx = normalizedBacktestStart 
+      ? dates.findIndex(d => {
+          const normalizedD = normalizeDate(d)
+          return normalizedD && normalizedD >= normalizedBacktestStart
+        })
+      : -1
+    
+    // For end index, find the last date that is <= normalizedBacktestEnd
+    // If not found, use the last index of dates array
+    let backtestEndIdx = dates.length
+    if (normalizedBacktestEnd) {
+      // Find the last index where date <= normalizedBacktestEnd
+      for (let i = dates.length - 1; i >= 0; i--) {
+        const normalizedD = normalizeDate(dates[i])
+        if (normalizedD && normalizedD <= normalizedBacktestEnd) {
+          backtestEndIdx = i + 1  // +1 to include this date in the range
+          break
+        }
+      }
+      // If no date found <= end date, but we have a start index, use dates.length
+      if (backtestEndIdx === dates.length && backtestStartIdx >= 0) {
+        backtestEndIdx = dates.length
+      }
+    }
+    
+    const hasBacktestPeriod = backtestStartIdx >= 0 && backtestEndIdx > backtestStartIdx
+    
+    console.log('=== Chart Rendering (Backend Indicators) ===')
     console.log('Kline data length:', klineData.length)
-    console.log('Closes length:', closes.length)
-    
-    if (indicators.macd) {
-      console.log('MACD enabled, calculating...')
-      if (macdData) {
-        console.log('MACD Data calculated:', {
-          macdLength: macdData.macd.length,
-          signalLength: macdData.signal.length,
-          histogramLength: macdData.histogram.length,
-          macdSample: macdData.macd.filter((v, i) => v !== undefined && i >= 25).slice(0, 5),
-          signalSample: macdData.signal.slice(0, 3),
-          histogramSample: macdData.histogram.filter((v, i) => v !== undefined && i >= 34).slice(0, 5),
-        })
-      } else {
-        console.warn('MACD data is null!')
-      }
-    }
-    
-    if (indicators.rsi) {
-      console.log('RSI enabled, calculating...')
-      if (rsiData) {
-        const rsiValues = rsiData.filter(v => v !== undefined)
-        console.log('RSI Data calculated:', {
-          rsiLength: rsiData.length,
-          rsiValidCount: rsiValues.length,
-          rsiSample: rsiValues.slice(0, 5),
-        })
-      } else {
-        console.warn('RSI data is null!')
-      }
-    }
-    
-    if (indicators.bollinger) {
-      console.log('Bollinger enabled, calculating...')
-      if (bollingerData) {
-        const upperValues = bollingerData.upper.filter(v => v !== undefined)
-        const middleValues = bollingerData.middle.filter(v => v !== undefined)
-        const lowerValues = bollingerData.lower.filter(v => v !== undefined)
-        console.log('Bollinger Data calculated:', {
-          upperLength: bollingerData.upper.length,
-          upperValidCount: upperValues.length,
-          middleLength: bollingerData.middle.length,
-          middleValidCount: middleValues.length,
-          lowerLength: bollingerData.lower.length,
-          lowerValidCount: lowerValues.length,
-          sample: {
-            upper: upperValues.slice(0, 3),
-            middle: middleValues.slice(0, 3),
-            lower: lowerValues.slice(0, 3),
-          },
-        })
-      } else {
-        console.warn('Bollinger data is null!')
-      }
-    }
-    
-    if (indicators.atr) {
-      console.log('ATR enabled, calculating...')
-      if (atrData) {
-        const atrValues = atrData.filter(v => v !== undefined)
-        console.log('ATR Data calculated:', {
-          atrLength: atrData.length,
-          atrValidCount: atrValues.length,
-          atrSample: atrValues.slice(0, 5),
-        })
-      } else {
-        console.warn('ATR data is null!')
-      }
-    }
+    console.log('Backtest period:', { 
+      start: backtestStart, 
+      normalizedStart: normalizedBacktestStart,
+      end: backtestEnd, 
+      normalizedEnd: normalizedBacktestEnd,
+      startIdx: backtestStartIdx, 
+      endIdx: backtestEndIdx,
+      hasBacktestPeriod,
+      dateSamples: dates.slice(0, 5),
+    })
+    console.log('Indicators available:', Object.keys(indicatorData))
 
     // Prepare trade markers
     const buyPoints: Array<{ date: string; price: number; originalDate: string; utcDate?: string }> = []
@@ -598,7 +743,8 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
     }
     
     // Adjust dataZoom top position based on number of grids
-    const dataZoomTop = currentTop + 5
+    // Ensure slider is always visible at the bottom
+    const dataZoomTop = Math.min(currentTop + 5, 85) // Cap at 85% to ensure visibility
 
     const option: echarts.EChartsOption = {
       backgroundColor: 'transparent',
@@ -625,17 +771,12 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
         {
           type: 'inside',
           xAxisIndex: xAxes.map((_, i) => i),
-          start: 0,
-          end: 100,
-        },
-        {
-          show: true,
-          xAxisIndex: xAxes.map((_, i) => i),
-          type: 'slider',
-          top: `${dataZoomTop}%`,
-          start: 0,
-          end: 100,
-          textStyle: { color: '#8B949E' },
+          start: visibleWindow.start,
+          end: visibleWindow.end,
+          zoomOnMouseWheel: true, // Enable mouse wheel zoom
+          moveOnMouseMove: true, // Enable drag to pan
+          moveOnMouseWheel: false, // Disable wheel to pan (use wheel for zoom)
+          preventDefaultMouseMove: true,
         },
       ],
       series: [
@@ -651,6 +792,39 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
             borderColor: null,
             borderColor0: null,
           },
+          // Add markArea to highlight backtest period
+          // For category xAxis, use index; for time xAxis, use date string
+          markArea: hasBacktestPeriod && backtestStartIdx >= 0 && backtestEndIdx > backtestStartIdx ? {
+            silent: false,
+            itemStyle: {
+              color: 'rgba(197, 160, 89, 0.2)', // Eidos Gold background for backtest period
+              borderColor: 'rgba(197, 160, 89, 0.5)',
+              borderWidth: 1,
+            },
+            data: [
+              [
+                {
+                  name: '回测开始',
+                  xAxis: backtestStartIdx,
+                },
+                {
+                  name: '回测结束',
+                  xAxis: Math.min(backtestEndIdx - 1, dates.length - 1),
+                },
+              ],
+            ],
+            label: {
+              show: true,
+              position: 'insideTop',
+              formatter: '回测区间',
+              color: '#C5A059',
+              fontSize: 12,
+              fontWeight: 'bold',
+              backgroundColor: 'rgba(197, 160, 89, 0.4)',
+              padding: [4, 8],
+              borderRadius: 4,
+            },
+          } : undefined,
         },
         // 均线（显示在K线图上）
         ...(indicators.ma5 && ma5Data ? [{
@@ -693,12 +867,12 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
           symbol: 'none',
           smooth: false,
         }] : []),
-        // 布林带（显示在K线图上）
+        // 布林带（显示在K线图上，使用后端计算的数据）
         ...(indicators.bollinger && bollingerData ? (() => {
-          // Convert undefined to null for ECharts compatibility
-          const upperData = bollingerData.upper.map(v => v !== undefined && !isNaN(v) ? v : null)
-          const middleData = bollingerData.middle.map(v => v !== undefined && !isNaN(v) ? v : null)
-          const lowerData = bollingerData.lower.map(v => v !== undefined && !isNaN(v) ? v : null)
+          // Convert null/undefined to null for ECharts compatibility
+          const upperData = bollingerData.upper.map(v => v !== null && v !== undefined && !isNaN(v) ? v : null)
+          const middleData = bollingerData.middle.map(v => v !== null && v !== undefined && !isNaN(v) ? v : null)
+          const lowerData = bollingerData.lower.map(v => v !== null && v !== undefined && !isNaN(v) ? v : null)
           
           const upperValidCount = upperData.filter(v => v !== null).length
           const middleValidCount = middleData.filter(v => v !== null).length
@@ -864,20 +1038,23 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
           const signalLineData: (number | null)[] = new Array(dates.length).fill(null)
           const histogramData: (number | null)[] = new Array(dates.length).fill(null)
           
+          // Fill MACD line data (backend returns arrays directly)
           macdData.macd.forEach((val, idx) => {
-            if (val !== undefined && !isNaN(val) && idx < dates.length) {
+            if (val !== null && val !== undefined && !isNaN(val) && idx < dates.length) {
               macdLineData[idx] = val
             }
           })
           
-          macdData.signal.forEach(({ value, index }) => {
-            if (value !== undefined && !isNaN(value) && index < dates.length) {
-              signalLineData[index] = value
+          // Fill Signal line data (backend returns arrays directly)
+          macdData.signal.forEach((val, idx) => {
+            if (val !== null && val !== undefined && !isNaN(val) && idx < dates.length) {
+              signalLineData[idx] = val
             }
           })
           
+          // Fill Histogram data (backend returns arrays directly)
           macdData.histogram.forEach((val, idx) => {
-            if (val !== undefined && !isNaN(val) && idx < dates.length) {
+            if (val !== null && val !== undefined && !isNaN(val) && idx < dates.length) {
               histogramData[idx] = val
             }
           })
@@ -885,16 +1062,25 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
           const macdValidCount = macdLineData.filter(v => v !== null).length
           const signalValidCount = signalLineData.filter(v => v !== null).length
           const histogramValidCount = histogramData.filter(v => v !== null).length
-          console.log('MACD Series Data:', {
+          
+          console.log('MACD Series Data (aligned with dates):', {
+            datesLength: dates.length,
             macdValidCount,
             signalValidCount,
             histogramValidCount,
-            macdSample: macdLineData.filter(v => v !== null).slice(0, 3),
-            signalSample: signalLineData.filter(v => v !== null).slice(0, 3),
+            macdSample: macdLineData.filter(v => v !== null).slice(0, 5),
+            signalSample: signalLineData.filter(v => v !== null).slice(0, 5),
+            histogramSample: histogramData.filter(v => v !== null).slice(0, 5),
+            macdRawSample: macdData.macd.filter(v => v !== null).slice(0, 5),
+            signalRawSample: macdData.signal.filter(v => v !== null).slice(0, 5),
+            histogramRawSample: macdData.histogram.filter(v => v !== null).slice(0, 5),
           })
           
-          return [
-            {
+          // Only add series if there's valid data
+          const series: any[] = []
+          
+          if (macdValidCount > 0) {
+            series.push({
               name: 'MACD',
               type: 'line',
               xAxisIndex: macdXAxisIndex,
@@ -902,8 +1088,13 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
               data: macdLineData,
               lineStyle: { color: '#00F2FF', width: 1.5 },
               symbol: 'none',
-            },
-            {
+            })
+          } else {
+            console.warn(`⚠️ MACD line has no valid data (need at least 26 data points, have ${dates.length})`)
+          }
+          
+          if (signalValidCount > 0) {
+            series.push({
               name: 'Signal',
               type: 'line',
               xAxisIndex: macdXAxisIndex,
@@ -911,8 +1102,13 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
               data: signalLineData,
               lineStyle: { color: '#FF3D00', width: 1.5 },
               symbol: 'none',
-            },
-            {
+            })
+          } else {
+            console.warn(`⚠️ MACD Signal line has no valid data (need at least 34 data points, have ${dates.length})`)
+          }
+          
+          if (histogramValidCount > 0) {
+            series.push({
               name: 'Histogram',
               type: 'bar',
               xAxisIndex: macdXAxisIndex,
@@ -924,8 +1120,12 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
                   return val !== null && val >= 0 ? '#00F2FF' : '#FF3D00'
                 },
               },
-            },
-          ]
+            })
+          } else {
+            console.warn(`⚠️ MACD Histogram has no valid data (need at least 34 data points, have ${dates.length})`)
+          }
+          
+          return series
         })() : []),
         // RSI指标
         ...(indicators.rsi && rsiData ? (() => {
@@ -1018,17 +1218,18 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
     
     try {
       chartInstanceRef.current.setOption(option)
+      const seriesArray = Array.isArray(option.series) ? option.series : (option.series ? [option.series] : [])
       console.log('Chart option set successfully', { 
         dataPoints: klineData.length,
         buyMarkers: buyMarkers.length,
         sellMarkers: sellMarkers.length,
-        totalSeries: option.series?.length || 0,
+        totalSeries: seriesArray.length,
         grids: grids.length,
         xAxes: xAxes.length,
         yAxes: yAxes.length,
         legendData: legendData.length,
       })
-      console.log('Series names:', option.series?.map((s: any) => s.name))
+      console.log('Series names:', seriesArray.map((s: any) => s.name))
     } catch (error) {
       console.error('Error setting chart option:', error)
       return
@@ -1046,14 +1247,47 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
       }
     }
     
-    // Remove previous resize handler if exists
+    // Handle dataZoom events for window-based navigation
+    const handleDataZoom = (params: any) => {
+      if (!chartInstanceRef.current) return
+      
+      const { start, end, batch } = params
+      
+      // Update visible window
+      setVisibleWindow({ start, end })
+      
+      
+      // Load more data when scrolling near boundaries (within 10% of edge)
+      if (!loadingMore) {
+        const threshold = 0.1 // 10% threshold
+        
+        if (start < threshold * 100 && dataRange.startDate) {
+          // Scrolling to the left edge, load earlier data
+          console.log('Loading earlier data...', { start, totalDataPoints: klineData.length })
+          loadMoreData('left')
+        } else if (end > (1 - threshold) * 100 && dataRange.endDate) {
+          // Scrolling to the right edge, load later data
+          console.log('Loading later data...', { end, totalDataPoints: klineData.length })
+          loadMoreData('right')
+        }
+      }
+    }
+    
+    // Remove previous handlers if exist
     if (resizeHandlerRef.current) {
       window.removeEventListener('resize', resizeHandlerRef.current)
     }
+    if (dataZoomHandlerRef.current && chartInstanceRef.current) {
+      chartInstanceRef.current.off('dataZoom', dataZoomHandlerRef.current)
+    }
     
-    // Add new resize handler and store reference
+    // Add new resize handler
     window.addEventListener('resize', handleResize)
     resizeHandlerRef.current = handleResize
+    
+    // Add dataZoom event listener
+    chart.on('dataZoom', handleDataZoom)
+    dataZoomHandlerRef.current = handleDataZoom
   }
 
   if (loading) {
@@ -1156,12 +1390,62 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
           </div>
         </div>
         
+        {/* Custom Slider Controller */}
+        <div className="px-4 py-2 border-b border-eidos-muted/20">
+          <div 
+            ref={sliderContainerRef}
+            className="relative w-full h-8 cursor-pointer"
+            onMouseDown={(e) => {
+              if (!sliderContainerRef.current) return
+              isDraggingSliderRef.current = true
+              const rect = sliderContainerRef.current.getBoundingClientRect()
+              const x = e.clientX - rect.left
+              const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100))
+              handleSliderDrag(percentage)
+              
+              const handleMouseMove = (moveEvent: MouseEvent) => {
+                if (!sliderContainerRef.current) return
+                const moveRect = sliderContainerRef.current.getBoundingClientRect()
+                const moveX = moveEvent.clientX - moveRect.left
+                const movePercentage = Math.max(0, Math.min(100, (moveX / moveRect.width) * 100))
+                handleSliderDrag(movePercentage)
+              }
+              
+              const handleMouseUp = () => {
+                isDraggingSliderRef.current = false
+                // Reset slider button to center after drag
+                setTimeout(() => {
+                  setSliderButtonPosition(50)
+                }, 100)
+                document.removeEventListener('mousemove', handleMouseMove)
+                document.removeEventListener('mouseup', handleMouseUp)
+              }
+              
+              document.addEventListener('mousemove', handleMouseMove)
+              document.addEventListener('mouseup', handleMouseUp)
+            }}
+          >
+            {/* Slider Track */}
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full h-1 bg-eidos-muted/20 rounded-full"></div>
+            </div>
+            
+            {/* Slider Button */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-eidos-gold rounded-full shadow-lg cursor-grab active:cursor-grabbing transition-all hover:scale-110"
+              style={{ left: `calc(${sliderButtonPosition}% - 8px)` }}
+            >
+              <div className="absolute inset-0 bg-eidos-gold rounded-full opacity-50 animate-pulse"></div>
+            </div>
+          </div>
+        </div>
+        
         {/* Chart */}
-        <div className="p-4" style={{ minHeight: '400px' }}>
+        <div className="p-4" style={{ minHeight: '500px' }}>
           <div 
             ref={chartRef} 
             className="w-full"
-            style={{ minHeight: '400px', height: '400px', width: '100%' }}
+            style={{ minHeight: '500px', height: '500px', width: '100%' }}
           />
           {klineData.length === 0 && !loading && (
             <div className="flex items-center justify-center h-[400px] text-eidos-muted text-sm">

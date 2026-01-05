@@ -136,18 +136,38 @@ async def get_stock_kline(
     symbol: str,
     start_date: Optional[date] = Query(None, description="Start date filter"),
     end_date: Optional[date] = Query(None, description="End date filter"),
+    indicators: Optional[str] = Query(None, description="Comma-separated list of indicators to calculate (macd,rsi,bollinger,atr,ma5,ma10,ma20,ma30)"),
 ):
     """
     Get K-line (OHLCV) data for a stock symbol within an experiment's date range.
+    Optionally calculate technical indicators on the backend.
     
     Args:
         exp_id: Experiment ID.
         symbol: Stock symbol (e.g., "000001.SZ").
         start_date: Optional start date filter.
         end_date: Optional end date filter.
+        indicators: Optional comma-separated list of indicators to calculate.
     
     Returns:
-        List of K-line data points with date, open, high, low, close, volume.
+        Dictionary with 'kline_data' (list of K-line points) and 'indicators' (calculated indicators).
     """
-    return await handlers.get_stock_kline_handler(exp_id, symbol, start_date=start_date, end_date=end_date)
+    # Parse indicators parameter
+    indicators_dict = None
+    if indicators:
+        indicator_list = [i.strip() for i in indicators.split(",")]
+        indicators_dict = {
+            "macd": "macd" in indicator_list,
+            "rsi": "rsi" in indicator_list,
+            "bollinger": "bollinger" in indicator_list,
+            "atr": "atr" in indicator_list,
+            "ma5": "ma5" in indicator_list,
+            "ma10": "ma10" in indicator_list,
+            "ma20": "ma20" in indicator_list,
+            "ma30": "ma30" in indicator_list,
+        }
+    
+    return await handlers.get_stock_kline_handler(
+        exp_id, symbol, start_date=start_date, end_date=end_date, indicators=indicators_dict
+    )
 
