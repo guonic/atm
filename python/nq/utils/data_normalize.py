@@ -13,6 +13,7 @@ Standardization Rules:
 """
 
 import re
+import pandas as pd
 from datetime import datetime
 from typing import Optional, Union
 
@@ -263,7 +264,6 @@ def normalize_date(date: Union[str, datetime]) -> str:
     
     # Try to parse with pandas
     try:
-        import pandas as pd
         dt = pd.to_datetime(date_str)
         return dt.strftime('%Y-%m-%d')
     except Exception:
@@ -307,7 +307,6 @@ def normalize_date_for_storage(date: Union[str, datetime]) -> str:
     
     # Try to parse with pandas
     try:
-        import pandas as pd
         dt = pd.to_datetime(date_str)
         return dt.strftime('%Y%m%d')
     except Exception:

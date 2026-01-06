@@ -14,7 +14,7 @@ sys.path.insert(0, str(project_root))
 
 import pandas as pd
 import numpy as np
-from nq.utils.technical_indicators import (
+from nq.trading.indicators.technical_indicators import (
     calculate_macd,
     calculate_rsi,
     calculate_bollinger_bands,
