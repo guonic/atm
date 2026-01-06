@@ -6,18 +6,17 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
-import pandas as pd
 
-from nq.api.rest.eidos.dependencies import get_eidos_repo
+from fastapi import HTTPException
+
+from nq.api.rest.eidos.dependencies import get_eidos_repo, get_kline_service
 from nq.api.rest.eidos.schemas import (
     ExperimentResponse,
     LedgerEntryResponse,
     TradeResponse,
     PerformanceMetricsResponse,
     TradeStatsResponse,
-    ErrorResponse,
 )
-from nq.repo.eidos_repo import EidosRepo
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +61,6 @@ async def get_experiment_handler(exp_id: str) -> ExperimentResponse:
     Raises:
         HTTPException: If experiment not found.
     """
-    from fastapi import HTTPException
-    
     repo = get_eidos_repo()
     exp = repo.experiment.get_experiment(exp_id)
     
@@ -177,8 +174,6 @@ async def get_performance_metrics_handler(exp_id: str) -> PerformanceMetricsResp
     Raises:
         HTTPException: If experiment not found or insufficient data.
     """
-    from fastapi import HTTPException
-    
     repo = get_eidos_repo()
     
     # Get experiment to verify it exists
@@ -248,8 +243,6 @@ async def get_trade_stats_handler(exp_id: str) -> TradeStatsResponse:
     Raises:
         HTTPException: If experiment not found.
     """
-    from fastapi import HTTPException
-    
     repo = get_eidos_repo()
     
     # Get experiment to verify it exists
@@ -308,16 +301,13 @@ async def get_stock_kline_handler(
     symbol: str,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    extend_days: int = 60,  # Extend backward by 60 trading days for indicator calculation
-    indicators: Optional[Dict[str, bool]] = None,  # Which indicators to calculate
-) -> Dict[str, any]:
+    extend_days: int = 60,
+    indicators: Optional[Dict[str, bool]] = None,
+) -> Dict[str, Any]:
     """
     Get K-line (OHLCV) data for a stock symbol.
     
-    This function retrieves stock price data from the database or Qlib.
-    If the experiment has date range, it will use that as default filter.
-    The function automatically extends the date range backward to ensure
-    sufficient data for technical indicators (e.g., MACD requires 34+ points).
+    This handler delegates to KlineService following the handler -> service -> repo -> model architecture.
     
     Args:
         exp_id: Experiment ID.
@@ -325,201 +315,27 @@ async def get_stock_kline_handler(
         start_date: Optional start date filter.
         end_date: Optional end date filter.
         extend_days: Number of trading days to extend backward (default: 60).
+        indicators: Dictionary of indicator names to boolean flags.
     
     Returns:
-        List of K-line data points with date, open, high, low, close, volume.
+        Dictionary with 'kline_data', 'indicators', 'backtest_start', 'backtest_end'.
+    
+    Raises:
+        HTTPException: If experiment not found or data retrieval fails.
     """
-    from fastapi import HTTPException
-    from datetime import datetime, timedelta
-    from nq.repo.kline_repo import StockKlineDayRepo
-    from nq.api.rest.eidos.dependencies import get_db_config
-    
-    repo = get_eidos_repo()
-    
-    # Get experiment to get date range
-    exp = repo.experiment.get_experiment(exp_id)
-    if not exp:
-        raise HTTPException(status_code=404, detail=f"Experiment {exp_id} not found")
-    
-    # Use experiment date range if not provided
-    original_start_date = start_date
-    if not start_date:
-        exp_start = exp.get("start_date")
-        if isinstance(exp_start, str):
-            start_date = date.fromisoformat(exp_start)
-        elif exp_start:
-            start_date = exp_start
-        original_start_date = start_date
-    
-    if not end_date:
-        exp_end = exp.get("end_date")
-        if isinstance(exp_end, str):
-            end_date = date.fromisoformat(exp_end)
-        elif exp_end:
-            end_date = exp_end
-    
-    # Store original end date for backtest period marking
-    original_end_date = end_date
-    
-    # Extend start_date backward to ensure sufficient data for indicators
-    # MACD requires at least 34 data points, so we extend by 60 trading days (~3 months)
-    if start_date:
-        # Extend backward by extend_days trading days (approximately 1.4x calendar days)
-        extended_start_date = start_date - timedelta(days=int(extend_days * 1.4))
-        logger.info(f"Extending K-line data range: original start={start_date}, extended start={extended_start_date} (for indicator calculation)")
-    else:
-        extended_start_date = None
-    
-    # Extend end_date forward to allow viewing data beyond backtest period
-    # Extend by 30 trading days (~42 calendar days) to allow scrolling forward
-    if end_date:
-        extended_end_date = end_date + timedelta(days=int(30 * 1.4))
-        logger.info(f"Extending K-line data range: original end={end_date}, extended end={extended_end_date} (for forward scrolling)")
-    else:
-        extended_end_date = None
-    
     try:
-        # Try to get data from database first
-        db_config = get_db_config()
-        kline_repo = StockKlineDayRepo(db_config, schema="quant")
-        
-        # Convert symbol format: "000001.SZ" -> "000001.SZ" (keep as is for now)
-        # If needed, convert to ts_code format
-        ts_code = symbol
-        
-        # Convert date to datetime for repo query (use extended dates)
-        start_datetime = datetime.combine(extended_start_date, datetime.min.time()) if extended_start_date else None
-        end_datetime = datetime.combine(extended_end_date, datetime.max.time()) if extended_end_date else None
-        
-        klines = kline_repo.get_by_ts_code(
-            ts_code=ts_code,
-            start_time=start_datetime,
-            end_time=end_datetime,
+        kline_service = get_kline_service()
+        result = kline_service.get_stock_kline(
+            exp_id=exp_id,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            indicators=indicators,
+            extend_days=extend_days,
         )
-        
-        if klines:
-            # Convert to list of dictionaries
-            result = []
-            for kline in klines:
-                trade_date = kline.trade_date
-                if isinstance(trade_date, datetime):
-                    date_str = trade_date.strftime("%Y-%m-%d")
-                elif isinstance(trade_date, date):
-                    date_str = trade_date.strftime("%Y-%m-%d")
-                else:
-                    date_str = str(trade_date)
-                
-                result.append({
-                    "date": date_str,
-                    "open": float(kline.open) if kline.open else 0.0,
-                    "high": float(kline.high) if kline.high else 0.0,
-                    "low": float(kline.low) if kline.low else 0.0,
-                    "close": float(kline.close) if kline.close else 0.0,
-                    "volume": float(kline.volume) if kline.volume else 0.0,
-                })
-            
-            # Sort by date
-            result.sort(key=lambda x: x["date"])
-            
-            # Add metadata to indicate original date range
-            # This allows frontend to know which dates are within the backtest period
-            for item in result:
-                item_date = date.fromisoformat(item["date"])
-                item["is_backtest_period"] = (
-                    original_start_date is None or item_date >= original_start_date
-                ) and (original_end_date is None or item_date <= original_end_date)
-            
-            logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from database (extended range: {extended_start_date} to {extended_end_date})")
-            
-            # Calculate indicators if requested
-            indicator_data = {}
-            if indicators:
-                from nq.utils.technical_indicators import calculate_indicators
-                try:
-                    indicator_data = calculate_indicators(result, indicators)
-                    logger.info(f"Calculated indicators: {list(indicator_data.keys())}")
-                except Exception as e:
-                    logger.warning(f"Failed to calculate indicators: {e}", exc_info=True)
-            
-            return {
-                "kline_data": result,
-                "indicators": indicator_data,
-                "backtest_start": original_start_date.isoformat() if original_start_date else None,
-                "backtest_end": original_end_date.isoformat() if original_end_date else None,
-            }
-        
-        # Fallback to Qlib if database doesn't have data
-        logger.info(f"No database K-line data found for {symbol}, trying Qlib...")
-        import qlib
-        from qlib.data import D
-        
-        # Initialize Qlib if not already initialized
-        try:
-            qlib.init()
-        except:
-            pass  # Already initialized
-        
-        # Fetch K-line data from Qlib (use extended dates)
-        start_str = extended_start_date.strftime("%Y-%m-%d") if extended_start_date else None
-        end_str = extended_end_date.strftime("%Y-%m-%d") if extended_end_date else None
-        
-        # Get OHLCV data
-        fields = ["$open", "$high", "$low", "$close", "$volume"]
-        data = D.features(
-            [symbol],
-            fields,
-            start_time=start_str,
-            end_time=end_str,
-            freq="day",
-        )
-        
-        if data.empty:
-            logger.warning(f"No K-line data found for {symbol} in date range {start_str} to {end_str}")
-            return []
-        
-        # Convert to list of dictionaries
-        result = []
-        for idx, row in data.iterrows():
-            date_obj = idx if hasattr(idx, "strftime") else pd.to_datetime(idx)
-            date_str = date_obj.strftime("%Y-%m-%d") if hasattr(date_obj, "strftime") else str(date_obj)
-            try:
-                item_date = date.fromisoformat(date_str) if isinstance(date_str, str) and len(date_str) == 10 else None
-            except:
-                item_date = None
-            
-            result.append({
-                "date": date_str,
-                "open": float(row["$open"]) if pd.notna(row["$open"]) else 0.0,
-                "high": float(row["$high"]) if pd.notna(row["$high"]) else 0.0,
-                "low": float(row["$low"]) if pd.notna(row["$low"]) else 0.0,
-                "close": float(row["$close"]) if pd.notna(row["$close"]) else 0.0,
-                "volume": float(row["$volume"]) if pd.notna(row["$volume"]) else 0.0,
-                "is_backtest_period": (
-                    item_date is not None and
-                    (original_start_date is None or item_date >= original_start_date) and
-                    (original_end_date is None or item_date <= original_end_date)
-                ) if item_date else False,
-            })
-        
-        logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from Qlib (extended range: {extended_start_date} to {extended_end_date})")
-        
-        # Calculate indicators if requested
-        indicator_data = {}
-        if indicators:
-            from nq.utils.technical_indicators import calculate_indicators
-            try:
-                indicator_data = calculate_indicators(result, indicators)
-                logger.info(f"Calculated indicators: {list(indicator_data.keys())}")
-            except Exception as e:
-                logger.warning(f"Failed to calculate indicators: {e}", exc_info=True)
-        
-        return {
-            "kline_data": result,
-            "indicators": indicator_data,
-            "backtest_start": original_start_date.isoformat() if original_start_date else None,
-            "backtest_end": original_end_date.isoformat() if original_end_date else None,
-        }
-        
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to get K-line data for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve K-line data: {str(e)}")

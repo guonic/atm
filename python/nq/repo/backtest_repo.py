@@ -44,9 +44,6 @@ class BacktestRepo:
 
         Uses urlsafe base64 of 6 random bytes -> 8 characters, no padding.
         """
-        import base64
-        import secrets
-
         return base64.urlsafe_b64encode(secrets.token_bytes(6)).decode("ascii").rstrip("=")
 
     def ensure_tables(self) -> None:
