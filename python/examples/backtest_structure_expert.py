@@ -2573,7 +2573,7 @@ def main():
                 logger.warning("Continuing without Eidos integration...")
 
         # Print results
-        # print_results(results)
+        print_results(results)
 
         # Plot results if requested
         if args.plot:
