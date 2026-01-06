@@ -136,7 +136,7 @@ async def get_stock_kline(
     symbol: str,
     start_date: Optional[date] = Query(None, description="Start date filter"),
     end_date: Optional[date] = Query(None, description="End date filter"),
-    indicators: Optional[str] = Query(None, description="Comma-separated list of indicators to calculate (macd,rsi,bollinger,atr,ma5,ma10,ma20,ma30)"),
+    indicators: Optional[str] = Query(None, description="Comma-separated list of indicators to calculate. Supported: ma5,ma10,ma20,ma30,ma60,ma120,ema,wma,rsi,kdj,cci,wr,obv,macd,dmi,bollinger,envelope,atr,bbw,vwap"),
 ):
     """
     Get K-line (OHLCV) data for a stock symbol within an experiment's date range.
@@ -157,14 +157,32 @@ async def get_stock_kline(
     if indicators:
         indicator_list = [i.strip() for i in indicators.split(",")]
         indicators_dict = {
-            "macd": "macd" in indicator_list,
-            "rsi": "rsi" in indicator_list,
-            "bollinger": "bollinger" in indicator_list,
-            "atr": "atr" in indicator_list,
+            # Trend indicators
             "ma5": "ma5" in indicator_list,
             "ma10": "ma10" in indicator_list,
             "ma20": "ma20" in indicator_list,
             "ma30": "ma30" in indicator_list,
+            "ma60": "ma60" in indicator_list,
+            "ma120": "ma120" in indicator_list,
+            "ema": "ema" in indicator_list,
+            "wma": "wma" in indicator_list,
+            # Oscillator indicators
+            "rsi": "rsi" in indicator_list,
+            "kdj": "kdj" in indicator_list,
+            "cci": "cci" in indicator_list,
+            "wr": "wr" in indicator_list,
+            "obv": "obv" in indicator_list,
+            # Trend + Oscillator indicators
+            "macd": "macd" in indicator_list,
+            "dmi": "dmi" in indicator_list,
+            # Channel indicators
+            "bollinger": "bollinger" in indicator_list,
+            "envelope": "envelope" in indicator_list,
+            # Volatility indicators
+            "atr": "atr" in indicator_list,
+            "bbw": "bbw" in indicator_list,
+            # Volume indicators
+            "vwap": "vwap" in indicator_list,
         }
     
     return await handlers.get_stock_kline_handler(

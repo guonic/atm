@@ -261,6 +261,3 @@ from nq.utils.data_normalize import convert_ts_code_to_qlib_format
 
 - [股票代码标准化详细说明](STOCK_CODE_STANDARD.md)
 - [Qlib 数据格式要求](QLIB_DATA_FORMAT.md)
-
-
-

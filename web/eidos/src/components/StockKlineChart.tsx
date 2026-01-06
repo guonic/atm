@@ -1,3 +1,15 @@
+/**
+ * @deprecated This component is deprecated. Use BacktestChart from './backtest/BacktestChart' instead.
+ * 
+ * This component has been replaced by:
+ * - StockChart: Standard stock analysis panel (./stock/StockChart)
+ * - BacktestChart: Backtest-specific chart with trade markers (./backtest/BacktestChart)
+ * 
+ * Migration guide:
+ * - Replace `StockKlineChart` with `BacktestChart` for backtest scenarios
+ * - Use `StockChart` for general stock analysis
+ */
+
 import React, { useState, useEffect, useRef } from 'react'
 import * as echarts from 'echarts'
 import { getStockKline, getTrades } from '@/services/api'
@@ -210,9 +222,10 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
   
   // Handle slider drag to move window
   const handleSliderDrag = (sliderPercentage: number) => {
-    if (!isDraggingSliderRef.current && !dragStartRef.current) {
-      // Start of drag
-      isDraggingSliderRef.current = true
+    if (!chartInstanceRef.current || chartInstanceRef.current.isDisposed()) return
+    
+    // Initialize drag start if not already set
+    if (!dragStartRef.current) {
       dragStartRef.current = {
         sliderStart: sliderButtonPosition,
         windowStart: visibleWindow.start,
@@ -224,9 +237,7 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
     const dragDistance = sliderPercentage - 50 // -50 to +50
     
     // Calculate window size
-    const windowSize = dragStartRef.current ? 
-      (dragStartRef.current.windowEnd - dragStartRef.current.windowStart) : 
-      (visibleWindow.end - visibleWindow.start)
+    const windowSize = dragStartRef.current.windowEnd - dragStartRef.current.windowStart
     
     // Calculate new window position based on drag distance
     // Drag left (negative) = move window left (earlier data)
@@ -234,12 +245,33 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
     const windowMoveDistance = dragDistance * 2 // Scale: slider moves 50% range, window moves proportionally
     
     const newWindowStart = Math.max(0, Math.min(100 - windowSize, 
-      (dragStartRef.current?.windowStart || visibleWindow.start) - windowMoveDistance))
+      dragStartRef.current.windowStart - windowMoveDistance))
     const newWindowEnd = newWindowStart + windowSize
     
-    // Update visible window
+    // Update visible window state
     setVisibleWindow({ start: newWindowStart, end: newWindowEnd })
     setSliderButtonPosition(sliderPercentage)
+    
+    // Directly update chart dataZoom to make it responsive
+    // Get all x-axis indices by checking the current option
+    try {
+      const currentOption = chartInstanceRef.current.getOption() as any
+      const xAxisCount = currentOption.xAxis?.length || 1
+      const xAxisIndices = Array.from({ length: xAxisCount }, (_, i) => i)
+      
+      chartInstanceRef.current.setOption({
+        dataZoom: [
+          {
+            type: 'inside',
+            xAxisIndex: xAxisIndices, // Update all x-axes
+            start: newWindowStart,
+            end: newWindowEnd,
+          },
+        ],
+      }, { notMerge: false, lazyUpdate: false })
+    } catch (error) {
+      console.error('Error updating chart dataZoom:', error)
+    }
   }
   
   // Load more data when scrolling to boundaries
@@ -1396,33 +1428,47 @@ function StockKlineChart({ expId, symbol, onClose, embedded = false }: StockKlin
             ref={sliderContainerRef}
             className="relative w-full h-8 cursor-pointer"
             onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
               if (!sliderContainerRef.current) return
+              
               isDraggingSliderRef.current = true
+              dragStartRef.current = null // Reset drag start
+              
               const rect = sliderContainerRef.current.getBoundingClientRect()
               const x = e.clientX - rect.left
               const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100))
               handleSliderDrag(percentage)
               
               const handleMouseMove = (moveEvent: MouseEvent) => {
-                if (!sliderContainerRef.current) return
+                if (!sliderContainerRef.current || !isDraggingSliderRef.current) return
+                moveEvent.preventDefault()
+                moveEvent.stopPropagation()
+                
                 const moveRect = sliderContainerRef.current.getBoundingClientRect()
                 const moveX = moveEvent.clientX - moveRect.left
                 const movePercentage = Math.max(0, Math.min(100, (moveX / moveRect.width) * 100))
                 handleSliderDrag(movePercentage)
               }
               
-              const handleMouseUp = () => {
+              const handleMouseUp = (upEvent: MouseEvent) => {
+                upEvent.preventDefault()
+                upEvent.stopPropagation()
+                
                 isDraggingSliderRef.current = false
+                dragStartRef.current = null
+                
                 // Reset slider button to center after drag
                 setTimeout(() => {
                   setSliderButtonPosition(50)
                 }, 100)
+                
                 document.removeEventListener('mousemove', handleMouseMove)
                 document.removeEventListener('mouseup', handleMouseUp)
               }
               
-              document.addEventListener('mousemove', handleMouseMove)
-              document.addEventListener('mouseup', handleMouseUp)
+              document.addEventListener('mousemove', handleMouseMove, { passive: false })
+              document.addEventListener('mouseup', handleMouseUp, { passive: false })
             }}
           >
             {/* Slider Track */}

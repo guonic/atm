@@ -358,6 +358,9 @@ async def get_stock_kline_handler(
         elif exp_end:
             end_date = exp_end
     
+    # Store original end date for backtest period marking
+    original_end_date = end_date
+    
     # Extend start_date backward to ensure sufficient data for indicators
     # MACD requires at least 34 data points, so we extend by 60 trading days (~3 months)
     if start_date:
@@ -366,6 +369,14 @@ async def get_stock_kline_handler(
         logger.info(f"Extending K-line data range: original start={start_date}, extended start={extended_start_date} (for indicator calculation)")
     else:
         extended_start_date = None
+    
+    # Extend end_date forward to allow viewing data beyond backtest period
+    # Extend by 30 trading days (~42 calendar days) to allow scrolling forward
+    if end_date:
+        extended_end_date = end_date + timedelta(days=int(30 * 1.4))
+        logger.info(f"Extending K-line data range: original end={end_date}, extended end={extended_end_date} (for forward scrolling)")
+    else:
+        extended_end_date = None
     
     try:
         # Try to get data from database first
@@ -376,9 +387,9 @@ async def get_stock_kline_handler(
         # If needed, convert to ts_code format
         ts_code = symbol
         
-        # Convert date to datetime for repo query (use extended start date)
+        # Convert date to datetime for repo query (use extended dates)
         start_datetime = datetime.combine(extended_start_date, datetime.min.time()) if extended_start_date else None
-        end_datetime = datetime.combine(end_date, datetime.max.time()) if end_date else None
+        end_datetime = datetime.combine(extended_end_date, datetime.max.time()) if extended_end_date else None
         
         klines = kline_repo.get_by_ts_code(
             ts_code=ts_code,
@@ -416,9 +427,9 @@ async def get_stock_kline_handler(
                 item_date = date.fromisoformat(item["date"])
                 item["is_backtest_period"] = (
                     original_start_date is None or item_date >= original_start_date
-                ) and (end_date is None or item_date <= end_date)
+                ) and (original_end_date is None or item_date <= original_end_date)
             
-            logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from database (extended range: {extended_start_date} to {end_date})")
+            logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from database (extended range: {extended_start_date} to {extended_end_date})")
             
             # Calculate indicators if requested
             indicator_data = {}
@@ -434,7 +445,7 @@ async def get_stock_kline_handler(
                 "kline_data": result,
                 "indicators": indicator_data,
                 "backtest_start": original_start_date.isoformat() if original_start_date else None,
-                "backtest_end": end_date.isoformat() if end_date else None,
+                "backtest_end": original_end_date.isoformat() if original_end_date else None,
             }
         
         # Fallback to Qlib if database doesn't have data
@@ -448,9 +459,9 @@ async def get_stock_kline_handler(
         except:
             pass  # Already initialized
         
-        # Fetch K-line data from Qlib (use extended start date)
+        # Fetch K-line data from Qlib (use extended dates)
         start_str = extended_start_date.strftime("%Y-%m-%d") if extended_start_date else None
-        end_str = end_date.strftime("%Y-%m-%d") if end_date else None
+        end_str = extended_end_date.strftime("%Y-%m-%d") if extended_end_date else None
         
         # Get OHLCV data
         fields = ["$open", "$high", "$low", "$close", "$volume"]
@@ -486,11 +497,11 @@ async def get_stock_kline_handler(
                 "is_backtest_period": (
                     item_date is not None and
                     (original_start_date is None or item_date >= original_start_date) and
-                    (end_date is None or item_date <= end_date)
+                    (original_end_date is None or item_date <= original_end_date)
                 ) if item_date else False,
             })
         
-        logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from Qlib (extended range: {extended_start_date} to {end_date})")
+        logger.info(f"Retrieved {len(result)} K-line data points for {symbol} from Qlib (extended range: {extended_start_date} to {extended_end_date})")
         
         # Calculate indicators if requested
         indicator_data = {}
@@ -506,7 +517,7 @@ async def get_stock_kline_handler(
             "kline_data": result,
             "indicators": indicator_data,
             "backtest_start": original_start_date.isoformat() if original_start_date else None,
-            "backtest_end": end_date.isoformat() if end_date else None,
+            "backtest_end": original_end_date.isoformat() if original_end_date else None,
         }
         
     except Exception as e:
