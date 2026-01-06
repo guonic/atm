@@ -1,5 +1,13 @@
 import axios from 'axios'
-import type { Experiment, LedgerEntry, Trade, PerformanceMetrics, TradeStats } from '@/types/eidos'
+import type {
+  Experiment,
+  LedgerEntry,
+  Trade,
+  PerformanceMetrics,
+  TradeStats,
+  BacktestReport,
+  ReportConfig,
+} from '@/types/eidos'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -101,6 +109,40 @@ export async function getStockKline(
       end_date: endDate,
       indicators: indicators?.join(','),
     },
+  })
+  return response.data
+}
+
+/**
+ * 获取完整的回测报告
+ */
+export async function getBacktestReport(
+  expId: string,
+  config?: ReportConfig
+): Promise<BacktestReport> {
+  const params: Record<string, string> = {}
+
+  if (config?.format) {
+    params.format = config.format
+  }
+  if (config?.categories) {
+    params.categories = config.categories.join(',')
+  }
+  if (config?.metrics) {
+    params.metrics = config.metrics.join(',')
+  }
+
+  const response = await api.get<BacktestReport>(`/experiments/${expId}/report`, { params })
+  return response.data
+}
+
+/**
+ * 导出报告（HTML/Markdown）
+ */
+export async function exportReport(expId: string, format: 'html' | 'markdown'): Promise<Blob> {
+  const response = await api.get(`/experiments/${expId}/report`, {
+    params: { format },
+    responseType: 'blob',
   })
   return response.data
 }

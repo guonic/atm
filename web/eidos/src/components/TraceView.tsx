@@ -3,10 +3,12 @@ import PerformancePanel from './PerformancePanel'
 import TradeStatsPanel from './TradeStatsPanel'
 import NavChart from './NavChart'
 import TradesTable from './TradesTable'
+import ReportCard from './ReportCard'
 
 interface TraceViewProps {
   expId: string | null
   loading: boolean
+  onModuleChange?: (module: string) => void
 }
 
 function TraceView({ expId, loading, onModuleChange }: TraceViewProps) {
@@ -76,9 +78,10 @@ function TraceView({ expId, loading, onModuleChange }: TraceViewProps) {
       <div className="flex-1 overflow-y-auto">
         {selectedModule === 'overview' && (
           <div className="space-y-3 p-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <PerformancePanel expId={expId} />
               <TradeStatsPanel expId={expId} />
+              <ReportCard expId={expId} />
             </div>
             <div className="bg-eidos-surface/40 glass-effect rounded-xl shadow-lg backdrop-blur-sm p-3">
               <NavChart expId={expId} />

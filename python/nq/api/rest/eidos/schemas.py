@@ -2,8 +2,10 @@
 Pydantic schemas for Eidos API requests and responses.
 """
 
+from __future__ import annotations
+
 from datetime import date as Date, datetime as DateTime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field, BaseModel
 
@@ -80,4 +82,31 @@ class ErrorResponse(BaseModel):
 
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Error details")
+
+
+# Report schemas
+class MetricResultResponse(BaseModel):
+    """Response schema for metric result."""
+    
+    name: str = Field(..., description="Metric name")
+    category: str = Field(..., description="Metric category")
+    value: Optional[float] = Field(None, description="Metric value")
+    unit: Optional[str] = Field(None, description="Unit")
+    format: Optional[str] = Field(None, description="Format string")
+    description: Optional[str] = Field(None, description="Description")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class BacktestReportResponse(BaseModel):
+    """Response schema for backtest report."""
+    
+    exp_id: str = Field(..., description="Experiment ID")
+    experiment_name: str = Field(..., description="Experiment name")
+    start_date: str = Field(..., description="Start date")
+    end_date: str = Field(..., description="End date")
+    generated_at: str = Field(..., description="Report generation timestamp")
+    metrics: List[MetricResultResponse] = Field(..., description="List of all metrics")
+    metrics_by_category: Dict[str, List[MetricResultResponse]] = Field(
+        ..., description="Metrics organized by category"
+    )
 

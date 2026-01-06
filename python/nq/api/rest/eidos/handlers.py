@@ -296,6 +296,67 @@ async def get_trade_stats_handler(exp_id: str) -> TradeStatsResponse:
     )
 
 
+async def get_backtest_report_handler(
+    exp_id: str,
+    format: Optional[str] = "json",
+    categories: Optional[str] = None,
+    metrics: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate complete backtest report for an experiment.
+    
+    Args:
+        exp_id: Experiment ID.
+        format: Output format (currently only 'json' is supported for API).
+        categories: Comma-separated list of metric categories.
+        metrics: Comma-separated list of metric names.
+    
+    Returns:
+        Backtest report data.
+    
+    Raises:
+        HTTPException: If experiment not found or report generation fails.
+    """
+    from nq.analysis.backtest.report import BacktestReportGenerator, ReportConfig
+    from nq.config import load_config
+    
+    try:
+        # Load database config
+        config = load_config("config/config.yaml")
+        db_config = config.database
+        
+        # Create report generator
+        generator = BacktestReportGenerator(db_config)
+        
+        # Parse categories and metrics
+        metric_categories = None
+        if categories:
+            metric_categories = [c.strip() for c in categories.split(",")]
+        
+        metric_names = None
+        if metrics:
+            metric_names = [m.strip() for m in metrics.split(",")]
+        
+        # Create report config
+        report_config = ReportConfig(
+            metric_categories=metric_categories,
+            metric_names=metric_names,
+            output_format=format,
+        )
+        
+        # Generate report
+        report = generator.generate_report(exp_id, config=report_config)
+        
+        return report
+        
+    except ValueError as e:
+        logger.error(f"Report generation failed: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Report generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+
+
 async def get_stock_kline_handler(
     exp_id: str,
     symbol: str,

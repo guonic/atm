@@ -14,6 +14,7 @@ from nq.api.rest.eidos.schemas import (
     TradeResponse,
     PerformanceMetricsResponse,
     TradeStatsResponse,
+    BacktestReportResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["eidos"])
@@ -187,5 +188,36 @@ async def get_stock_kline(
     
     return await handlers.get_stock_kline_handler(
         exp_id, symbol, start_date=start_date, end_date=end_date, indicators=indicators_dict
+    )
+
+
+@router.get("/experiments/{exp_id}/report", response_model=BacktestReportResponse)
+async def get_backtest_report(
+    exp_id: str,
+    format: Optional[str] = Query("json", description="Output format (json, console, html, markdown)"),
+    categories: Optional[str] = Query(None, description="Comma-separated metric categories (portfolio, trading, turnover, risk, model)"),
+    metrics: Optional[str] = Query(None, description="Comma-separated metric names"),
+):
+    """
+    Get complete backtest report for an experiment.
+    
+    Generates a comprehensive report with metrics organized by category:
+    - Portfolio metrics (returns, Sharpe ratio, drawdown, etc.)
+    - Trading statistics (win rate, profit factor, etc.)
+    - Turnover statistics (turnover rate, position count, etc.)
+    - Risk metrics (if available)
+    - Model performance metrics (if available)
+    
+    Args:
+        exp_id: Experiment ID.
+        format: Output format (currently only 'json' is supported for API).
+        categories: Optional comma-separated list of metric categories to include.
+        metrics: Optional comma-separated list of specific metric names to include.
+    
+    Returns:
+        Complete backtest report with all metrics.
+    """
+    return await handlers.get_backtest_report_handler(
+        exp_id, format=format, categories=categories, metrics=metrics
     )
 
