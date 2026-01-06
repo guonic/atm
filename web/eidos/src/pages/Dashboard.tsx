@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
 import ConfigPanel from '@/components/ConfigPanel'
 import TraceView from '@/components/TraceView'
+import ReportView from '@/components/report/ReportView'
 import { Experiment } from '@/types/eidos'
 import { getExperiments } from '@/services/api'
 
@@ -32,9 +33,19 @@ function Dashboard() {
   }
 
   const renderSubsystemContent = () => {
+    if (!selectedExpId) {
+      return (
+        <div className="flex justify-center items-center h-full">
+          <div className="text-eidos-muted">请选择一个实验</div>
+        </div>
+      )
+    }
+
     switch (selectedSubsystem) {
       case 'trace':
         return <TraceView expId={selectedExpId} loading={loading} onModuleChange={setCurrentModule} />
+      case 'report':
+        return <ReportView expId={selectedExpId} />
       default:
         return (
           <div className="flex justify-center items-center h-full">

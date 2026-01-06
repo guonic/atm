@@ -6,6 +6,7 @@ interface SidebarProps {
 // 子系统列表
 const subsystems = [
   { id: 'trace', name: 'Trace', description: '回测追踪分析' },
+  { id: 'report', name: 'Report', description: '回测报告' },
   // 未来可以添加更多子系统，如：
   // { id: 'analyze', name: 'Analyze', description: '深度分析' },
   // { id: 'compare', name: 'Compare', description: '对比分析' },

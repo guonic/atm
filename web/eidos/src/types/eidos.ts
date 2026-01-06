@@ -68,3 +68,30 @@ export interface TradeStats {
   avg_hold_days: number
 }
 
+// Report types
+export interface MetricResult {
+  name: string
+  category: string
+  value: number | null  // Can be int or float
+  unit?: string
+  format?: string
+  description?: string
+  metadata?: Record<string, any>
+}
+
+export interface BacktestReport {
+  exp_id: string
+  experiment_name: string
+  start_date: string
+  end_date: string
+  generated_at: string
+  metrics: MetricResult[]
+  metrics_by_category: Record<string, MetricResult[]>
+}
+
+export interface ReportConfig {
+  format?: 'json' | 'console' | 'html' | 'markdown'
+  categories?: string[]
+  metrics?: string[]
+}
+
