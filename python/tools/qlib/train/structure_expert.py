@@ -13,6 +13,7 @@ Classes:
 """
 
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -24,8 +25,86 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import GATv2Conv
 
+# Add parent directory to path for utils import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from tools.qlib.utils import clean_dataframe
+
 logger = logging.getLogger(__name__)
 
+
+
+class DirectionalStockGNN(torch.nn.Module):
+    """
+    Directional Stock Graph Neural Network model for stock prediction.
+
+    This model uses Graph Attention Network (GAT) layers with edge attributes to
+    capture directional relationships between stocks. It processes stock features
+    through two GAT layers that incorporate edge attributes (correlation metrics)
+    and outputs prediction scores for next period returns.
+
+    The model is designed to handle directional relationships between stocks by
+    incorporating edge attributes that represent correlation metrics between
+    connected stocks.
+
+    Attributes:
+        conv1: First GAT layer that fuses node features with edge attributes.
+        conv2: Second GAT layer for deep structural feature extraction.
+        fc: Fully connected layer that outputs prediction scores.
+    """
+
+    def __init__(
+        self, node_in_channels: int, edge_in_channels: int, hidden_channels: int
+    ) -> None:
+        """
+        Initialize the DirectionalStockGNN model.
+
+        Args:
+            node_in_channels: Number of input features per stock node.
+            edge_in_channels: Number of edge attributes (correlation metrics).
+                Typically 4 for four correlation metrics.
+            hidden_channels: Hidden dimension size for GAT layers.
+        """
+        super(DirectionalStockGNN, self).__init__()
+
+        # edge_dim = 4 (four correlation metrics we calculated)
+        self.conv1 = GATv2Conv(
+            node_in_channels, hidden_channels, edge_dim=edge_in_channels
+        )
+        self.conv2 = GATv2Conv(
+            hidden_channels, hidden_channels, edge_dim=edge_in_channels
+        )
+
+        self.fc = torch.nn.Linear(hidden_channels, 1)  # Predict next period return
+
+    def forward(
+        self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Forward pass through the model.
+
+        Args:
+            x: Node features tensor of shape [N, D] where N is the number of nodes
+                (stocks) and D is the number of features per node (e.g., open, high,
+                low, close prices and other technical indicators).
+            edge_index: Edge index tensor of shape [2, E] where E is the number of
+                edges. Each column represents a directed edge from source to target.
+            edge_attr: Edge attributes tensor of shape [E, edge_in_channels]
+                containing correlation metrics between connected stocks.
+
+        Returns:
+            Prediction tensor of shape [N, 1] containing predicted next period
+            returns for each stock.
+        """
+        # First layer convolution: fuse node features with edge attributes
+        x = self.conv1(x, edge_index, edge_attr=edge_attr)
+        x = torch.nn.functional.elu(x)
+
+        # Second layer convolution: extract structural features deeply
+        x = self.conv2(x, edge_index, edge_attr=edge_attr)
+        x = torch.nn.functional.elu(x)
+
+        return self.fc(x)
 
 class StructureExpertGNN(nn.Module):
     """
@@ -121,7 +200,7 @@ class StructureExpertGNN(nn.Module):
         # the model still retains the characteristic individuality of the original individual stocks
         h_final = h + identity
 
-        # 5. output
+        # 5. Output prediction
         logits = self.predict(h_final)
 
         return logits, h_final
@@ -149,7 +228,8 @@ class GraphDataBuilder:
         self.industry_map = industry_map
 
     def get_daily_graph(
-        self, df_x: pd.DataFrame, df_y: Optional[pd.DataFrame] = None
+        self, df_x: pd.DataFrame, df_y: Optional[pd.DataFrame] = None, 
+        include_edge_attr: bool = False
     ) -> Data:
         """
         Convert Qlib format daily cross-sectional DataFrame to PyG Data object.
@@ -157,21 +237,19 @@ class GraphDataBuilder:
         Args:
             df_x: Input features DataFrame with MultiIndex (datetime, instrument).
             df_y: Optional target values DataFrame with same index as df_x.
+            include_edge_attr: If True, generate edge attributes for DirectionalStockGNN.
+                Edge attributes are simple 4D vectors based on industry relationships.
 
         Returns:
             PyTorch Geometric Data object containing:
                 - x: Node features tensor.
                 - y: Optional target values tensor.
                 - edge_index: Edge index tensor connecting stocks in same industry.
+                - edge_attr: Optional edge attributes tensor (if include_edge_attr=True).
                 - symbols: List of stock symbols.
         """
-        # Clean NaN and Inf values before converting to tensor
-        if df_x.isna().any().any():
-            logger.warning(f"Found NaN in df_x, filling with 0")
-            df_x = df_x.fillna(0.0)
-        if (df_x == np.inf).any().any() or (df_x == -np.inf).any().any():
-            logger.warning(f"Found Inf in df_x, replacing with 0")
-            df_x = df_x.replace([np.inf, -np.inf], 0.0)
+        # Clean NaN and Inf values before converting to tensor using unified function
+        df_x = clean_dataframe(df_x, fill_value=0.0, log_stats=True, context="df_x in get_daily_graph")
         
         stock_list = df_x.index.get_level_values("instrument").tolist()
         x = torch.tensor(df_x.values, dtype=torch.float)
@@ -183,13 +261,8 @@ class GraphDataBuilder:
         
         y = None
         if df_y is not None:
-            # Clean labels
-            if df_y.isna().any().any():
-                logger.warning(f"Found NaN in df_y, filling with 0")
-                df_y = df_y.fillna(0.0)
-            if (df_y == np.inf).any().any() or (df_y == -np.inf).any().any():
-                logger.warning(f"Found Inf in df_y, replacing with 0")
-                df_y = df_y.replace([np.inf, -np.inf], 0.0)
+            # Clean labels using unified function
+            df_y = clean_dataframe(df_y, fill_value=0.0, log_stats=True, context="df_y in get_daily_graph")
             
             y = torch.tensor(df_y.values, dtype=torch.float)
             
@@ -213,18 +286,35 @@ class GraphDataBuilder:
             # Note: Stocks without industry mapping are not added to ind_to_nodes,
             # so they won't have edges, but they will still be included in the graph
 
+        edge_attr_list = []
         for nodes in ind_to_nodes.values():
             for i in nodes:
                 for j in nodes:
                     if i != j:
                         edge_index.append([i, j])
+                        # Generate simple edge attributes if requested
+                        # For DirectionalStockGNN, we use 4D edge attributes
+                        # [same_industry_flag, node_i_idx_normalized, node_j_idx_normalized, edge_count]
+                        if include_edge_attr:
+                            edge_attr = torch.tensor([
+                                1.0,  # Same industry flag
+                                float(i) / len(stock_list),  # Normalized source node index
+                                float(j) / len(stock_list),  # Normalized target node index
+                                1.0 / len(nodes),  # Inverse of industry size (edge density)
+                            ], dtype=torch.float)
+                            edge_attr_list.append(edge_attr)
 
         if len(edge_index) == 0:
             edge_index = torch.zeros((2, 0), dtype=torch.long)
+            edge_attr = None
         else:
             edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+            if include_edge_attr and len(edge_attr_list) > 0:
+                edge_attr = torch.stack(edge_attr_list)
+            else:
+                edge_attr = None
 
-        return Data(x=x, y=y, edge_index=edge_index, symbols=stock_list)
+        return Data(x=x, y=y, edge_index=edge_index, edge_attr=edge_attr, symbols=stock_list)
 
 
 class StructureTrainer:
@@ -232,23 +322,24 @@ class StructureTrainer:
     Training manager for the Structure Expert GNN model.
 
     This class handles model training, optimization, and embedding extraction
-    for visualization purposes.
+    for visualization purposes. Supports both StructureExpertGNN and DirectionalStockGNN models.
 
     Attributes:
         device: PyTorch device (CPU or CUDA).
-        model: Structure Expert GNN model.
+        model: Structure Expert GNN model (StructureExpertGNN or DirectionalStockGNN).
         optimizer: Adam optimizer for training.
         criterion: MSE loss function.
+        use_edge_attr: Whether the model requires edge attributes.
     """
 
     def __init__(
-        self, model: StructureExpertGNN, lr: float = 1e-3, device: str = "cuda"
+        self, model: torch.nn.Module, lr: float = 1e-3, device: str = "cuda"
     ) -> None:
         """
         Initialize the StructureTrainer.
 
         Args:
-            model: Structure Expert GNN model instance.
+            model: GNN model instance (StructureExpertGNN or DirectionalStockGNN).
             lr: Learning rate for optimizer (default: 1e-3).
             device: Device to use ('cuda' or 'cpu', default: 'cuda').
         """
@@ -258,6 +349,8 @@ class StructureTrainer:
             self.model.parameters(), lr=lr, weight_decay=1e-5
         )
         self.criterion = nn.MSELoss()
+        # Check if model requires edge attributes
+        self.use_edge_attr = isinstance(model, DirectionalStockGNN)
 
     def train_step(self, daily_graph: Data) -> float:
         """
@@ -278,7 +371,19 @@ class StructureTrainer:
             return float('nan')
         
         self.optimizer.zero_grad()
-        pred, embedding = self.model(data.x, data.edge_index)
+        
+        # Call model forward based on model type
+        if self.use_edge_attr:
+            # DirectionalStockGNN requires edge_attr
+            if not hasattr(data, 'edge_attr') or data.edge_attr is None:
+                logger.warning("Model requires edge_attr but data doesn't have it, skipping")
+                return float('nan')
+            pred = self.model(data.x, data.edge_index, data.edge_attr)
+            # DirectionalStockGNN only returns predictions, not embeddings
+            embedding = None
+        else:
+            # StructureExpertGNN doesn't require edge_attr
+            pred, embedding = self.model(data.x, data.edge_index)
         
         # Check for NaN in predictions
         if torch.isnan(pred).any() or torch.isinf(pred).any():
@@ -345,12 +450,22 @@ class StructureTrainer:
 
         Returns:
             Numpy array of embeddings with shape [num_nodes, embedding_dim].
+            For DirectionalStockGNN, returns predictions as embeddings.
         """
         self.model.eval()
         with torch.no_grad():
             data = daily_graph.to(self.device)
-            _, embedding = self.model(data.x, data.edge_index)
-        return embedding.cpu().numpy()
+            if self.use_edge_attr:
+                # DirectionalStockGNN only returns predictions
+                if not hasattr(data, 'edge_attr') or data.edge_attr is None:
+                    logger.warning("Model requires edge_attr but data doesn't have it")
+                    return np.array([])
+                pred = self.model(data.x, data.edge_index, data.edge_attr)
+                return pred.cpu().numpy()
+            else:
+                # StructureExpertGNN returns (pred, embedding)
+                _, embedding = self.model(data.x, data.edge_index)
+                return embedding.cpu().numpy()
 
 
 # Constants for demo
@@ -363,24 +478,26 @@ def load_structure_expert_model(
     n_feat: int = 158,
     n_hidden: int = 128,
     n_heads: int = 8,
+    edge_in_channels: int = 4,
     device: str = "cuda",
-) -> StructureExpertGNN:
+) -> torch.nn.Module:
     """
-    Load trained Structure Expert model from checkpoint file.
+    Load trained GNN model from checkpoint file.
 
-    This function loads a trained Structure Expert GNN model from a PyTorch checkpoint
-    file (.pth) and sets it to evaluation mode for inference. It automatically detects
-    model parameters from the state_dict if not provided.
+    This function automatically detects the model type (StructureExpertGNN or DirectionalStockGNN)
+    from the state_dict and loads the appropriate model. It automatically detects model parameters
+    from the state_dict if not provided.
 
     Args:
         model_path: Path to model checkpoint file (.pth).
         n_feat: Number of input features (default: 158 for Alpha158).
         n_hidden: Hidden layer size (default: 128). Will be auto-detected if None.
-        n_heads: Number of attention heads (default: 8). Will be auto-detected if None.
+        n_heads: Number of attention heads for StructureExpertGNN (default: 8). Will be auto-detected if None.
+        edge_in_channels: Number of edge attribute channels for DirectionalStockGNN (default: 4).
         device: Device to load model on ('cuda' or 'cpu', default: 'cuda').
 
     Returns:
-        Loaded StructureExpertGNN model in evaluation mode.
+        Loaded model (StructureExpertGNN or DirectionalStockGNN) in evaluation mode.
 
     Raises:
         FileNotFoundError: If model file does not exist.
@@ -394,59 +511,124 @@ def load_structure_expert_model(
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    logger.info(f"Loading Structure Expert model from {model_path}")
+    logger.info(f"Loading model from {model_path}")
 
-    # Load state_dict first to infer parameters
+    # Load state_dict first to infer parameters and model type
     device_obj = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
     state_dict = torch.load(model_path, map_location=device_obj)
 
-    # Auto-detect parameters from state_dict if needed
-    detected_n_feat = n_feat
-    detected_n_hidden = n_hidden
-    detected_n_heads = n_heads
+    # Detect model type based on state_dict keys
+    is_directional = "fc.weight" in state_dict and "conv1.lin_edge.weight" in state_dict
+    is_structure_expert = "shortcut.weight" in state_dict or "predict.0.weight" in state_dict
 
-    # Try to infer n_feat from shortcut layer (if exists)
-    if "shortcut.weight" in state_dict:
-        detected_n_feat = state_dict["shortcut.weight"].shape[1]
-        detected_n_hidden = state_dict["shortcut.weight"].shape[0]
-        logger.info(f"Detected shortcut layer: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}")
-    # Try to infer from conv1 layer
-    elif "conv1.lin_l.weight" in state_dict:
-        # GATv2Conv: lin_l is [n_heads * n_hidden, n_feat]
-        conv1_out_dim = state_dict["conv1.lin_l.weight"].shape[0]
-        detected_n_feat = state_dict["conv1.lin_l.weight"].shape[1]
-        detected_n_heads = n_heads  # Keep provided value or default
-        if detected_n_heads > 0:
-            detected_n_hidden = conv1_out_dim // detected_n_heads
-        logger.info(f"Detected from conv1: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}, n_heads={detected_n_heads}")
-    # Try to infer from conv2 layer
-    elif "conv2.lin_l.weight" in state_dict:
-        # conv2 input is n_hidden * n_heads from conv1 output
-        conv2_in_dim = state_dict["conv2.lin_l.weight"].shape[1]
-        conv2_out_dim = state_dict["conv2.lin_l.weight"].shape[0]
-        detected_n_hidden = conv2_out_dim
-        if detected_n_heads > 0:
-            # conv2 input should be n_hidden * n_heads
-            detected_n_hidden = conv2_in_dim // detected_n_heads if detected_n_heads > 0 else conv2_out_dim
-        logger.info(f"Detected from conv2: n_hidden={detected_n_hidden}")
+    if is_directional:
+        logger.info("Detected DirectionalStockGNN model")
+        # Detect parameters for DirectionalStockGNN
+        detected_n_feat = n_feat
+        detected_n_hidden = n_hidden
+        detected_edge_in_channels = edge_in_channels
 
-    # Use detected values if they differ from provided defaults
-    if detected_n_feat != n_feat or detected_n_hidden != n_hidden:
-        logger.info(f"Using auto-detected parameters: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}, n_heads={detected_n_heads}")
+        # Infer from conv1.lin_l (node features input)
+        if "conv1.lin_l.weight" in state_dict:
+            detected_n_feat = state_dict["conv1.lin_l.weight"].shape[1]
+            # conv1.lin_l output is hidden_channels
+            detected_n_hidden = state_dict["conv1.lin_l.weight"].shape[0]
+            logger.info(f"Detected from conv1.lin_l: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}")
+
+        # Infer edge_in_channels from conv1.lin_edge
+        if "conv1.lin_edge.weight" in state_dict:
+            detected_edge_in_channels = state_dict["conv1.lin_edge.weight"].shape[1]
+            logger.info(f"Detected edge_in_channels={detected_edge_in_channels} from conv1.lin_edge")
+
+        # Use detected values
         n_feat = detected_n_feat
         n_hidden = detected_n_hidden
+        edge_in_channels = detected_edge_in_channels
+
+        # Initialize DirectionalStockGNN model
+        model = DirectionalStockGNN(
+            node_in_channels=n_feat,
+            edge_in_channels=edge_in_channels,
+            hidden_channels=n_hidden,
+        )
+        logger.info(
+            f"Initialized DirectionalStockGNN: "
+            f"node_in={n_feat}, edge_in={edge_in_channels}, hidden={n_hidden}"
+        )
+
+    elif is_structure_expert:
+        logger.info("Detected StructureExpertGNN model")
+        # Auto-detect parameters from state_dict
+        detected_n_feat = n_feat
+        detected_n_hidden = n_hidden
+        detected_n_heads = n_heads
+
+        # Try to infer n_feat from shortcut layer (if exists)
+        if "shortcut.weight" in state_dict:
+            detected_n_feat = state_dict["shortcut.weight"].shape[1]
+            detected_n_hidden = state_dict["shortcut.weight"].shape[0]
+            logger.info(f"Detected shortcut layer: n_feat={detected_n_feat}, n_hidden={detected_n_hidden}")
+        # Try to infer from conv1 layer
+        elif "conv1.lin_l.weight" in state_dict:
+            # GATv2Conv: lin_l is [n_heads * n_hidden, n_feat]
+            conv1_out_dim = state_dict["conv1.lin_l.weight"].shape[0]
+            detected_n_feat = state_dict["conv1.lin_l.weight"].shape[1]
+            # Try to infer n_heads from conv1.att shape
+            if "conv1.att.weight" in state_dict:
+                # conv1.att shape is [1, n_heads, n_hidden]
+                att_shape = state_dict["conv1.att.weight"].shape
+                if len(att_shape) == 3:
+                    detected_n_heads = att_shape[1]
+                    detected_n_hidden = att_shape[2]
+                else:
+                    # Fallback: assume single head
+                    detected_n_heads = 1
+                    detected_n_hidden = conv1_out_dim
+            else:
+                detected_n_heads = n_heads  # Keep provided value or default
+                if detected_n_heads > 0:
+                    detected_n_hidden = conv1_out_dim // detected_n_heads
+            logger.info(
+                f"Detected from conv1: n_feat={detected_n_feat}, "
+                f"n_hidden={detected_n_hidden}, n_heads={detected_n_heads}"
+            )
+        # Try to infer from conv2 layer
+        elif "conv2.lin_l.weight" in state_dict:
+            # conv2 input is n_hidden * n_heads from conv1 output
+            conv2_in_dim = state_dict["conv2.lin_l.weight"].shape[1]
+            conv2_out_dim = state_dict["conv2.lin_l.weight"].shape[0]
+            detected_n_hidden = conv2_out_dim
+            if detected_n_heads > 0:
+                # conv2 input should be n_hidden * n_heads
+                detected_n_hidden = (
+                    conv2_in_dim // detected_n_heads if detected_n_heads > 0 else conv2_out_dim
+                )
+            logger.info(f"Detected from conv2: n_hidden={detected_n_hidden}")
+
+        # Use detected values
+        n_feat = detected_n_feat
+        n_hidden = detected_n_hidden
+        n_heads = detected_n_heads
+
+        # Initialize StructureExpertGNN model
+        model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=n_heads)
+        logger.info(
+            f"Initialized StructureExpertGNN: "
+            f"n_feat={n_feat}, n_hidden={n_hidden}, n_heads={n_heads}"
+        )
     else:
-        logger.info(f"Using provided parameters: n_feat={n_feat}, n_hidden={n_hidden}, n_heads={detected_n_heads}")
+        raise RuntimeError(
+            "Could not determine model type from state_dict. "
+            "Expected either DirectionalStockGNN (with fc.weight, conv1.lin_edge.weight) "
+            "or StructureExpertGNN (with shortcut.weight or predict.0.weight)."
+        )
 
-    # Initialize model with correct parameters
-    model = StructureExpertGNN(n_feat=n_feat, n_hidden=n_hidden, n_heads=detected_n_heads)
-
-    # Load weights with strict=False to handle missing or extra keys
+    # Load weights
     try:
         model.load_state_dict(state_dict, strict=True)
         logger.info("Model loaded with strict=True (all keys matched)")
     except RuntimeError as e:
-        if "Missing key(s)" in str(e) or "Unexpected key(s)" in str(e):
+        if "Missing key(s)" in str(e) or "Unexpected key(s)" in str(e) or "size mismatch" in str(e):
             logger.warning(f"Model loading with strict=True failed: {e}")
             logger.info("Attempting to load with strict=False (allowing missing/extra keys)")
             missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
@@ -462,7 +644,8 @@ def load_structure_expert_model(
     model = model.to(device_obj)
     model.eval()  # Set to evaluation mode - no gradient computation, no training
 
-    logger.info(f"Model loaded successfully on {device_obj} (evaluation mode - inference only)")
+    model_type = "DirectionalStockGNN" if is_directional else "StructureExpertGNN"
+    logger.info(f"{model_type} loaded successfully on {device_obj} (evaluation mode - inference only)")
     return model
 
 

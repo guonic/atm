@@ -60,10 +60,22 @@ from typing import List, Dict, Optional
 import numpy as np
 import pandas as pd
 
-# 本地模块
-from atm.config import loader
-from atm.data.dataingestor import DataIngestorService
+# 本地模块 - 包内部使用相对导入
+from .base import BaseModel
+from .utils import helper_function
+from ..config import Config
+
+# 本地模块 - 跨包使用绝对导入
+from nq.config import load_config
+from nq.data.dataingestor import DataIngestorService
+from tools.qlib.train.structure_expert import StructureExpertGNN
 ```
+
+**导入规则**：
+- **包内部模块之间**：使用相对导入（`from .module import ...` 或 `from ..parent import ...`）
+- **跨包导入**：使用绝对导入（`from package.module import ...`）
+- **包的主 `__init__.py`**：优先使用相对导入
+- **脚本和示例**：使用绝对导入（`from nq.module import ...`）
 
 ### 文档字符串
 - 所有公共函数、类、模块必须有 docstring

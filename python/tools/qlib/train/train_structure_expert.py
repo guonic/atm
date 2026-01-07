@@ -36,9 +36,17 @@ from nq.utils.industry import load_industry_map
 
 # Import structure expert model using standard package import
 from tools.qlib.train.structure_expert import (
+    DirectionalStockGNN,
     GraphDataBuilder,
     StructureExpertGNN,
     StructureTrainer,
+)
+from tools.qlib.utils import (
+    align_and_clean_features_labels,
+    clean_dataframe,
+    get_handler_data,
+    is_valid_number,
+    load_next_day_returns,
 )
 
 logging.basicConfig(
@@ -65,21 +73,23 @@ def get_feature_names() -> List[str]:
 
 
 def train_rolling(
-    model: StructureExpertGNN,
+    model: torch.nn.Module,
     trainer: StructureTrainer,
     builder: GraphDataBuilder,
     date_range: List[datetime],
     qlib_dir: str,
+    use_edge_attr: bool = False,
 ) -> None:
     """
     Perform rolling training over date range.
 
     Args:
-        model: Structure Expert GNN model.
+        model: GNN model instance (StructureExpertGNN or DirectionalStockGNN).
         trainer: Structure trainer instance.
         builder: Graph data builder instance.
         date_range: List of dates to train on.
         qlib_dir: Path to Qlib data directory.
+        use_edge_attr: Whether to include edge attributes in graph data.
     """
     logger.info(f"Starting rolling training for {len(date_range)} days")
 
@@ -101,94 +111,39 @@ def train_rolling(
             )
             handler.setup_data()
             
-            # Get features - use handler.data or fetch without data_key
-            # For single date, we can use handler.data directly
-            try:
-                # Try using handler.data property
-                df_x = handler.data
-                if df_x is None or df_x.empty:
-                    # Fallback: try fetch method
-                    df_x = handler.fetch(col_set="feature")
-            except Exception:
-                # If that fails, try fetch without data_key
-                df_x = handler.fetch(col_set="feature")
+            # Get features using unified data retrieval function
+            df_x = get_handler_data(handler, col_set="feature")
 
-            # Load labels (future returns) for this date
-            # For simplicity, use next day return as label
-            if idx < len(date_range) - 1:
-                next_date = date_range[idx + 1]
-                next_date_str = next_date.strftime("%Y-%m-%d")
-
-                # Get all instruments
-                instruments = D.instruments()
-                if not isinstance(instruments, list):
-                    instruments = list(instruments)
-
-                # Calculate returns
-                df_y = D.features(
-                    instruments,
-                    ["Ref($close, -1) / $close - 1"],  # Next day return
-                    start_time=train_date_str,
-                    end_time=next_date_str,
-                )
-            else:
-                # Last date, use current close as placeholder
-                df_y = None
+            # Load labels (future returns) for this date using unified function
+            df_y = load_next_day_returns(
+                current_date=train_date,
+                date_range=date_range,
+                current_idx=idx,
+            )
 
             # Check if we have valid data
             if df_x.empty:
                 logger.warning(f"No data for {train_date_str}, skipping")
                 continue
 
-            # Clean NaN values in features
-            # Fill NaN with 0 (or forward fill if preferred)
-            nan_count_before = df_x.isna().sum().sum()
-            if nan_count_before > 0:
-                logger.debug(f"Day {train_date_str}: Found {nan_count_before} NaN values in features, filling with 0")
-                # Fill NaN with 0 (safer than forward fill for cross-sectional data)
-                df_x = df_x.fillna(0.0)
-                # Also replace Inf with 0
-                df_x = df_x.replace([np.inf, -np.inf], 0.0)
+            # Clean NaN and Inf values in features using unified function
+            df_x = clean_dataframe(
+                df_x, fill_value=0.0, log_stats=True, context=f"features for {train_date_str}"
+            )
 
-            # Align df_x and df_y indices if df_y is provided
-            if df_y is not None and not df_y.empty:
-                # Find common indices between df_x and df_y
-                common_idx = df_x.index.intersection(df_y.index)
-                if len(common_idx) == 0:
-                    logger.warning(
-                        f"No common indices between features and labels for {train_date_str}, skipping"
-                    )
-                    continue
-                
-                # Filter to common indices
-                df_x_aligned = df_x.loc[common_idx]
-                df_y_aligned = df_y.loc[common_idx]
-                
-                # Clean NaN in aligned data
-                if df_x_aligned.isna().any().any():
-                    logger.debug(f"Day {train_date_str}: Cleaning NaN in aligned features")
-                    df_x_aligned = df_x_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
-                
-                if df_y_aligned is not None and df_y_aligned.isna().any().any():
-                    logger.debug(f"Day {train_date_str}: Cleaning NaN in aligned labels")
-                    df_y_aligned = df_y_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
-                
-                if df_x_aligned.empty:
-                    logger.warning(f"No aligned data for {train_date_str}, skipping")
-                    continue
-            else:
-                # No labels available, use df_x only
-                df_x_aligned = df_x
-                df_y_aligned = None
-                logger.debug(f"No labels available for {train_date_str}, using features only")
-                
-                # Ensure df_x_aligned is clean
-                if df_x_aligned.isna().any().any():
-                    logger.debug(f"Day {train_date_str}: Cleaning NaN in features (no labels)")
-                    df_x_aligned = df_x_aligned.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+            # Align and clean features and labels using unified function
+            df_x_aligned, df_y_aligned = align_and_clean_features_labels(
+                df_x=df_x,
+                df_y=df_y,
+                fill_value=0.0,
+                log_stats=True,
+                context=train_date_str,
+            )
 
             # Build graph for this date
-            daily_graph = builder.get_daily_graph(df_x_aligned, df_y_aligned)
+            daily_graph = builder.get_daily_graph(
+                df_x_aligned, df_y_aligned, include_edge_attr=use_edge_attr
+            )
 
             # Skip if no edges (no industry connections)
             if daily_graph.edge_index.shape[1] == 0:
@@ -198,36 +153,28 @@ def train_rolling(
             # Train on this day's graph
             loss = trainer.train_step(daily_graph)
             
-            # Check if loss is valid (not NaN)
-            if loss is not None and not (isinstance(loss, float) and (loss != loss or loss == float('inf'))):
-                # loss is valid (not NaN or Inf)
+            # Check if loss is valid using unified function
+            if is_valid_number(loss):
                 total_loss += loss
                 trained_days += 1
                 logger.debug(f"Day {train_date_str}: Loss = {loss:.6f}")
             else:
-                # loss is NaN or Inf
-                logger.warning(f"Day {train_date_str}: Loss is NaN/Inf, skipping from average")
+                logger.warning(f"Day {train_date_str}: Loss is invalid (None/NaN/Inf), skipping from average")
 
             # Print progress every 10 days or when no successful training yet
-            if (idx + 1) % 3 == 0 or (trained_days == 0 and (idx + 1) % 5 == 0):
-                if trained_days > 0:
-                    avg_loss = total_loss / trained_days
-                    # Format loss value safely
-                    if loss is not None and isinstance(loss, (int, float)) and not (loss != loss or loss == float('inf')):
-                        loss_str = f"{loss:.6f}"
-                    else:
-                        loss_str = "NaN"
-                    
-                    logger.info(
-                        f"Progress: {idx + 1}/{len(date_range)} days processed | "
-                        f"Successfully trained: {trained_days} days | "
-                        f"Avg Loss: {avg_loss:.6f} | Last Loss: {loss_str}"
-                    )
+            if (idx + 1) % 3 == 0 and trained_days != 0:
+                avg_loss = total_loss / trained_days
+                # Format loss value safely using unified function
+                if is_valid_number(loss):
+                    loss_str = f"{loss:.6f}"
                 else:
-                    logger.warning(
-                        f"Progress: {idx + 1}/{len(date_range)} days processed | "
-                        f"No successful training yet (all days failed or skipped)"
-                    )
+                    loss_str = "NaN/Inf"
+
+                logger.info(
+                    f"Progress: {idx + 1}/{len(date_range)} days processed | "
+                    f"Successfully trained: {trained_days} days | "
+                    f"Avg Loss: {avg_loss:.6f} | Last Loss: {loss_str}"
+                )
 
         except Exception as e:
             logger.warning(f"Failed to train on {train_date_str}: {e}")
@@ -339,6 +286,21 @@ Examples:
         help="Path to save trained model (optional)",
     )
 
+    parser.add_argument(
+        "--model-type",
+        type=str,
+        choices=["structure_expert", "directional"],
+        default="structure_expert",
+        help="Model type to use: 'structure_expert' (default) or 'directional' (DirectionalStockGNN)",
+    )
+
+    parser.add_argument(
+        "--edge-in-channels",
+        type=int,
+        default=4,
+        help="Number of edge attribute channels for DirectionalStockGNN (default: 4)",
+    )
+
     args = parser.parse_args()
 
     # Parse dates
@@ -400,14 +362,37 @@ Examples:
         return 1
 
     # Initialize model and components
-    logger.info("Initializing model and components...")
-    model = StructureExpertGNN(n_feat=args.n_feat, n_hidden=args.n_hidden, n_heads=args.n_heads)
+    logger.info(f"Initializing {args.model_type} model and components...")
+    
+    if args.model_type == "directional":
+        # Use DirectionalStockGNN model
+        use_edge_attr = True
+        model = DirectionalStockGNN(
+            node_in_channels=args.n_feat,
+            edge_in_channels=args.edge_in_channels,
+            hidden_channels=args.n_hidden,
+        )
+        logger.info(
+            f"Using DirectionalStockGNN: "
+            f"node_in={args.n_feat}, edge_in={args.edge_in_channels}, hidden={args.n_hidden}"
+        )
+    else:
+        # Use StructureExpertGNN model (default)
+        use_edge_attr = False
+        model = StructureExpertGNN(
+            n_feat=args.n_feat, n_hidden=args.n_hidden, n_heads=args.n_heads
+        )
+        logger.info(
+            f"Using StructureExpertGNN: "
+            f"n_feat={args.n_feat}, n_hidden={args.n_hidden}, n_heads={args.n_heads}"
+        )
+    
     trainer = StructureTrainer(model, lr=args.lr, device=args.device)
     builder = GraphDataBuilder(industry_map)
 
     # Perform rolling training
     logger.info("Starting rolling training...")
-    train_rolling(model, trainer, builder, date_range, qlib_dir)
+    train_rolling(model, trainer, builder, date_range, qlib_dir, use_edge_attr=use_edge_attr)
 
     # Save model if requested
     if args.save_model:

@@ -33,6 +33,7 @@ from nq.utils.industry import load_industry_map
 
 # Import structure expert model using standard package import
 from tools.qlib.train.structure_expert import GraphDataBuilder, StructureExpertGNN, StructureTrainer
+from tools.qlib.utils import get_handler_data
 
 
 @st.cache_data
@@ -80,7 +81,14 @@ def load_model_and_data(
         start_time=target_date,
         end_time=target_date,
     )
-    df_x = handler.fetch(col_set="feature", data_key="train")
+    handler.setup_data()
+    # Try to get data with data_key first, fallback to unified function
+    try:
+        df_x = handler.fetch(col_set="feature", data_key="train")
+        if df_x is None or df_x.empty:
+            df_x = get_handler_data(handler, col_set="feature")
+    except Exception:
+        df_x = get_handler_data(handler, col_set="feature")
 
     if df_x.empty:
         st.error(f"No data available for {target_date}")

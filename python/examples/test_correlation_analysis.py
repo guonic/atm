@@ -34,6 +34,10 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from nq.config import load_config
+from nq.repo.kline_repo import StockKlineDayRepo
+from nq.utils.industry import load_industry_map
+
 from nq.analysis.correlation import (
     CrossLaggedCorrelation,
     DynamicCrossSectionalCorrelation,
@@ -72,9 +76,6 @@ def load_data_from_database(
     Returns:
         Tuple of (returns_df, highs_df, lows_df, industry_map).
     """
-    from nq.config import load_config
-    from nq.repo.kline_repo import StockKlineDayRepo
-    from nq.utils.industry import load_industry_map
     
     # Load config
     if config_path is None:
