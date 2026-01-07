@@ -148,10 +148,12 @@ from nq.analysis.backtest.qlib_types import QlibBacktestResult
 
 # Import structure expert model using standard package import
 from tools.qlib.train.structure_expert import (
+    DirectionalStockGNN,
     GraphDataBuilder,
     StructureExpertGNN,
     load_structure_expert_model,
 )
+from tools.qlib.utils import clean_dataframe, get_handler_data
 
 # Configure logging
 logging.basicConfig(
@@ -812,12 +814,8 @@ def _load_features_for_date(
         date_handler = Alpha158(**handler_kwargs)
         date_handler.setup_data()
 
-        try:
-            df_x = date_handler.data
-            if df_x is None or df_x.empty:
-                df_x = date_handler.fetch(col_set="feature")
-        except Exception:
-            df_x = date_handler.fetch(col_set="feature")
+        # Get features using unified data retrieval function
+        df_x = get_handler_data(date_handler, col_set="feature")
     except Exception as e:
         logger.debug(f"Failed to load with lookback ({lookback_start_str} to {trade_date_str}): {e}")
         # Try without lookback
@@ -833,12 +831,9 @@ def _load_features_for_date(
 
         date_handler = Alpha158(**handler_kwargs)
         date_handler.setup_data()
-        try:
-            df_x = date_handler.data
-            if df_x is None or df_x.empty:
-                df_x = date_handler.fetch(col_set="feature")
-        except Exception:
-            df_x = date_handler.fetch(col_set="feature")
+
+        # Get features using unified data retrieval function
+        df_x = get_handler_data(date_handler, col_set="feature")
 
     if df_x.empty:
         # Diagnostic check
@@ -877,14 +872,14 @@ def _load_features_for_date(
         logger.warning(f"No data for target date {trade_date_str} after filtering")
         return None
 
-    # Clean NaN/Inf
-    df_x = df_x.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    # Clean NaN/Inf using unified function
+    df_x = clean_dataframe(df_x, fill_value=0.0, log_stats=True, context=f"features for {trade_date_str}")
     return df_x
 
 
 def _process_single_date(
     trade_date: pd.Timestamp,
-    model: StructureExpertGNN,
+    model: torch.nn.Module,
     builder: GraphDataBuilder,
     device_obj: torch.device,
     lookback_days: int,
@@ -916,13 +911,16 @@ def _process_single_date(
     logger.info(f"Processing {trade_date_str}")
 
     try:
+        # Detect model type
+        is_directional = isinstance(model, DirectionalStockGNN)
+
         # Load features
         df_x = _load_features_for_date(trade_date, lookback_days, instruments, data_start_date)
         if df_x is None or df_x.empty:
             return None
 
-        # Build graph
-        daily_graph = builder.get_daily_graph(df_x, None)
+        # Build graph (include edge_attr for DirectionalStockGNN)
+        daily_graph = builder.get_daily_graph(df_x, None, include_edge_attr=is_directional)
         if daily_graph.x.shape[0] == 0:
             logger.warning(f"No stocks for {trade_date_str}, skipping")
             return None
@@ -931,9 +929,20 @@ def _process_single_date(
         logger.debug(f"Running inference for {trade_date_str}...")
         with torch.no_grad():
             data = daily_graph.to(device_obj)
-            pred, embedding = model(data.x, data.edge_index)
-            pred = pred.cpu().numpy().flatten()
-            embedding_np = embedding.cpu().numpy()
+            if is_directional:
+                # DirectionalStockGNN requires edge_attr
+                if not hasattr(data, 'edge_attr') or data.edge_attr is None:
+                    logger.warning(f"No edge_attr for {trade_date_str}, skipping")
+                    return None
+                pred = model(data.x, data.edge_index, edge_attr=data.edge_attr)
+                pred = pred.cpu().numpy().flatten()
+                # DirectionalStockGNN doesn't return embeddings, use predictions as placeholder
+                embedding_np = pred.copy()
+            else:
+                # StructureExpertGNN returns (pred, embedding)
+                pred, embedding = model(data.x, data.edge_index)
+                pred = pred.cpu().numpy().flatten()
+                embedding_np = embedding.cpu().numpy()
 
         # Get stock symbols
         if hasattr(daily_graph, "symbols"):
@@ -981,7 +990,7 @@ def _process_single_date(
 
 
 def generate_predictions(
-    model: StructureExpertGNN,
+    model: torch.nn.Module,
     builder: GraphDataBuilder,
     start_date: str,
     end_date: str,
