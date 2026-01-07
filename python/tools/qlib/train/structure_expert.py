@@ -27,6 +27,32 @@ from torch_geometric.nn import GATv2Conv
 logger = logging.getLogger(__name__)
 
 
+
+class DirectionalStockGNN(torch.nn.Module):
+    def __init__(self, node_in_channels, edge_in_channels, hidden_channels):
+        super(DirectionalStockGNN, self).__init__()
+
+        # edge_dim = 4 (我们算的四个指标)
+        self.conv1 = GATv2Conv(node_in_channels, hidden_channels, edge_dim=edge_in_channels)
+        self.conv2 = GATv2Conv(hidden_channels, hidden_channels, edge_dim=edge_in_channels)
+
+        self.fc = torch.nn.Linear(hidden_channels, 1)  # 预测下一阶段收益
+
+    def forward(self, x, edge_index, edge_attr):
+        # x: [N, D] 节点特征 (开高低收等)
+        # edge_index: [2, E] 边连接关系
+        # edge_attr: [E, 4] 你的 4 种相关性指标
+
+        # 第一层卷积：节点特征与边属性融合
+        x = self.conv1(x, edge_index, edge_attr=edge_attr)
+        x = torch.nn.functional.elu(x)
+
+        # 第二层卷积：深度提取结构特征
+        x = self.conv2(x, edge_index, edge_attr=edge_attr)
+        x = torch.nn.functional.elu(x)
+
+        return self.fc(x)
+
 class StructureExpertGNN(nn.Module):
     """
     Graph Attention Network (GAT) based model for stock prediction.
