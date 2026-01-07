@@ -10,6 +10,7 @@ Implements five core correlation calculation methods:
 """
 
 import logging
+import warnings
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -43,7 +44,7 @@ class DynamicCrossSectionalCorrelation:
                       If None, returns all correlations.
         """
         self.window = window
-        self.threshold = threshold
+        self.threshold = 0.0 if threshold is None else threshold
     
     def calculate(
         self,
@@ -74,14 +75,13 @@ class DynamicCrossSectionalCorrelation:
             # Use last window days
             returns_subset = returns_subset.iloc[-self.window:]
         
-        # Calculate Pearson correlation
-        correlation_matrix = returns_subset.corr()
+        # Calculate spearman correlation, Notes: The Pearson algorithm is overly sensitive to extreme values.
+        correlation_matrix = returns_subset.corr(method="spearman")
         
         # Apply threshold if specified
-        if self.threshold is not None:
-            correlation_matrix = correlation_matrix.where(
-                abs(correlation_matrix) >= self.threshold, 0.0
-            )
+        correlation_matrix = correlation_matrix.where(
+            abs(correlation_matrix) >= self.threshold, 0.0
+        )
         
         return correlation_matrix
     
@@ -110,7 +110,7 @@ class DynamicCrossSectionalCorrelation:
         if len(aligned) > self.window:
             aligned = aligned.iloc[-self.window:]
         
-        return aligned["i"].corr(aligned["j"])
+        return aligned["i"].corr(aligned["j"], method="spearman")
 
 
 class CrossLaggedCorrelation:
@@ -165,7 +165,7 @@ class CrossLaggedCorrelation:
         if len(pair_ij) < 2:
             corr_i_to_j = 0.0
         else:
-            corr_i_to_j = pair_ij["i_lag"].corr(pair_ij["j"])
+            corr_i_to_j = pair_ij["i_lag"].corr(pair_ij["j"], method="spearman")
             if pd.isna(corr_i_to_j):
                 corr_i_to_j = 0.0
         
@@ -177,7 +177,7 @@ class CrossLaggedCorrelation:
         if len(pair_ji) < 2:
             corr_j_to_i = 0.0
         else:
-            corr_j_to_i = pair_ji["j_lag"].corr(pair_ji["i"])
+            corr_j_to_i = pair_ji["j_lag"].corr(pair_ji["i"], method="spearman")
             if pd.isna(corr_j_to_i):
                 corr_j_to_i = 0.0
         
@@ -427,36 +427,38 @@ class GrangerCausality:
             return False, 1.0, None
         
         try:
-            # Test A -> B
-            test_ab = grangercausalitytests(
-                aligned[["B", "A"]],
-                maxlag=self.maxlag,
-                verbose=False,
-            )
-            
-            # Get minimum P-value across all lags
-            p_values_ab = []
-            for lag in range(1, self.maxlag + 1):
-                p_value = test_ab[lag][0]["ssr_ftest"][1]  # F-test P-value
-                p_values_ab.append(p_value)
-            
-            min_p_ab = min(p_values_ab)
-            is_causal_ab = min_p_ab < self.significance_level
-            
-            # Test B -> A
-            test_ba = grangercausalitytests(
-                aligned[["A", "B"]],
-                maxlag=self.maxlag,
-                verbose=False,
-            )
-            
-            p_values_ba = []
-            for lag in range(1, self.maxlag + 1):
-                p_value = test_ba[lag][0]["ssr_ftest"][1]
-                p_values_ba.append(p_value)
-            
-            min_p_ba = min(p_values_ba)
-            is_causal_ba = min_p_ba < self.significance_level
+            # Suppress FutureWarning about verbose parameter
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=FutureWarning, message=".*verbose.*")
+                
+                # Test A -> B
+                test_ab = grangercausalitytests(
+                    aligned[["B", "A"]],
+                    maxlag=self.maxlag,
+                )
+                
+                # Get minimum P-value across all lags
+                p_values_ab = []
+                for lag in range(1, self.maxlag + 1):
+                    p_value = test_ab[lag][0]["ssr_ftest"][1]  # F-test P-value
+                    p_values_ab.append(p_value)
+                
+                min_p_ab = min(p_values_ab)
+                is_causal_ab = min_p_ab < self.significance_level
+                
+                # Test B -> A
+                test_ba = grangercausalitytests(
+                    aligned[["A", "B"]],
+                    maxlag=self.maxlag,
+                )
+                
+                p_values_ba = []
+                for lag in range(1, self.maxlag + 1):
+                    p_value = test_ba[lag][0]["ssr_ftest"][1]
+                    p_values_ba.append(p_value)
+                
+                min_p_ba = min(p_values_ba)
+                is_causal_ba = min_p_ba < self.significance_level
             
             # Determine direction
             if is_causal_ab and is_causal_ba:

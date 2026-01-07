@@ -9,14 +9,27 @@ This script demonstrates how to use the correlation analysis module to:
 3. Visualize correlation relationships
 
 Usage:
-    cd /Users/guonic/Workspace/OpenSource/atm
-    source .venv/bin/activate
-    export PYTHONPATH=/Users/guonic/Workspace/OpenSource/atm/python:$PYTHONPATH
+    # Use mock data (default)
     python python/examples/test_correlation_analysis.py
+
+    # Use real data from database
+    python python/examples/test_correlation_analysis.py --use-db
+
+    # Use real data with specific stocks and date range
+    python python/examples/test_correlation_analysis.py --use-db \
+        --stocks 000001.SZ 000002.SZ 600000.SH \
+        --start-date 2024-01-01 --end-date 2024-06-30
+
+    # Use Qlib data
+    python python/examples/test_correlation_analysis.py --use-qlib \
+        --qlib-dir ~/.qlib/qlib_data/cn_data
 """
 
+import argparse
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -37,6 +50,184 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def load_data_from_database(
+    stocks: List[str],
+    start_date: datetime,
+    end_date: datetime,
+    config_path: Optional[str] = None,
+    schema: str = "quant",
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+    """
+    Load stock data from database.
+    
+    Args:
+        stocks: List of stock codes (e.g., ['000001.SZ', '000002.SZ']).
+        start_date: Start date.
+        end_date: End date.
+        config_path: Path to config file (default: config/config.yaml).
+        schema: Database schema name.
+    
+    Returns:
+        Tuple of (returns_df, highs_df, lows_df, industry_map).
+    """
+    from nq.config import load_config
+    from nq.repo.kline_repo import StockKlineDayRepo
+    from nq.utils.industry import load_industry_map
+    
+    # Load config
+    if config_path is None:
+        config_path = "config/config.yaml"
+    
+    config = load_config(config_path)
+    db_config = config.database
+    
+    # Load industry map
+    logger.info("Loading industry mapping...")
+    industry_map = load_industry_map(db_config, target_date=end_date, schema=schema)
+    
+    # Load kline data for each stock
+    repo = StockKlineDayRepo(db_config, schema)
+    
+    returns_data = {}
+    highs_data = {}
+    lows_data = {}
+    
+    for stock in stocks:
+        logger.info(f"Loading data for {stock}...")
+        klines = repo.get_by_ts_code(
+            ts_code=stock,
+            start_time=start_date,
+            end_time=end_date,
+        )
+        
+        if not klines:
+            logger.warning(f"No data found for {stock}")
+            continue
+        
+        # Convert to DataFrame
+        data_list = []
+        for kline in klines:
+            data_list.append({
+                "date": kline.trade_date,
+                "open": float(kline.open) if kline.open else None,
+                "high": float(kline.high) if kline.high else None,
+                "low": float(kline.low) if kline.low else None,
+                "close": float(kline.close) if kline.close else None,
+            })
+        
+        df = pd.DataFrame(data_list)
+        df = df.sort_values("date").reset_index(drop=True)
+        df["date"] = pd.to_datetime(df["date"])
+        df.set_index("date", inplace=True)
+        
+        # Calculate returns
+        returns = df["close"].pct_change().dropna()
+        
+        # Store data
+        returns_data[stock] = returns
+        highs_data[stock] = df["high"]
+        lows_data[stock] = df["low"]
+    
+    # Align all dataframes
+    returns_df = pd.DataFrame(returns_data)
+    highs_df = pd.DataFrame(highs_data)
+    lows_df = pd.DataFrame(lows_data)
+    
+    # Drop rows with all NaN
+    returns_df = returns_df.dropna(how="all")
+    highs_df = highs_df.dropna(how="all")
+    lows_df = lows_df.dropna(how="all")
+    
+    logger.info(f"Loaded data: {len(returns_df)} days, {len(returns_df.columns)} stocks")
+    
+    return returns_df, highs_df, lows_df, industry_map
+
+
+def load_data_from_qlib(
+    stocks: List[str],
+    start_date: str,
+    end_date: str,
+    qlib_dir: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+    """
+    Load stock data from Qlib.
+    
+    Args:
+        stocks: List of stock codes (e.g., ['000001.SZ', '000002.SZ']).
+        start_date: Start date (YYYY-MM-DD).
+        end_date: End date (YYYY-MM-DD).
+        qlib_dir: Qlib data directory.
+    
+    Returns:
+        Tuple of (returns_df, highs_df, lows_df, industry_map).
+    """
+    import importlib.util
+    
+    # Check if qlib is available
+    _qlib_spec = importlib.util.find_spec("qlib")
+    if _qlib_spec is None:
+        raise ImportError("Qlib is not installed. Please install it first: pip install pyqlib")
+    
+    import qlib
+    from qlib.data import D
+    
+    # Initialize Qlib
+    if qlib_dir is None:
+        qlib_dir = str(Path.home() / ".qlib" / "qlib_data" / "cn_data")
+    
+    qlib.init(provider_uri=qlib_dir, region="cn")
+    
+    # Load data
+    logger.info(f"Loading data from Qlib: {qlib_dir}")
+    
+    returns_data = {}
+    highs_data = {}
+    lows_data = {}
+    
+    for stock in stocks:
+        logger.info(f"Loading data for {stock}...")
+        try:
+            # Load OHLCV data
+            data = D.features(
+                instruments=[stock],
+                fields=["$close", "$high", "$low"],
+                start_time=start_date,
+                end_time=end_date,
+            )
+            
+            if data.empty:
+                logger.warning(f"No data found for {stock}")
+                continue
+            
+            # Calculate returns
+            returns = data[f"{stock}"]["$close"].pct_change().dropna()
+            
+            # Store data
+            returns_data[stock] = returns
+            highs_data[stock] = data[f"{stock}"]["$high"]
+            lows_data[stock] = data[f"{stock}"]["$low"]
+        except Exception as e:
+            logger.warning(f"Failed to load {stock}: {e}")
+            continue
+    
+    # Align all dataframes
+    returns_df = pd.DataFrame(returns_data)
+    highs_df = pd.DataFrame(highs_data)
+    lows_df = pd.DataFrame(lows_data)
+    
+    # Drop rows with all NaN
+    returns_df = returns_df.dropna(how="all")
+    highs_df = highs_df.dropna(how="all")
+    lows_df = lows_df.dropna(how="all")
+    
+    # Load industry map (simplified - would need proper Qlib industry data)
+    industry_map = {}
+    
+    logger.info(f"Loaded data: {len(returns_df)} days, {len(returns_df.columns)} stocks")
+    
+    return returns_df, highs_df, lows_df, industry_map
 
 
 def generate_mock_data(n_stocks: int = 10, n_days: int = 100) -> tuple:
@@ -309,30 +500,134 @@ def test_enhanced_graph_builder(
 
 def main():
     """Main test function."""
+    parser = argparse.ArgumentParser(
+        description="Test EnhancedGraphDataBuilder and correlation analysis methods"
+    )
+    parser.add_argument(
+        "--use-db",
+        action="store_true",
+        help="Use real data from database instead of mock data",
+    )
+    parser.add_argument(
+        "--use-qlib",
+        action="store_true",
+        help="Use real data from Qlib instead of mock data",
+    )
+    parser.add_argument(
+        "--stocks",
+        nargs="+",
+        default=["000001.SZ", "000002.SZ", "600000.SH", "600036.SH", "000858.SZ"],
+        help="List of stock codes (default: ['000001.SZ', '000002.SZ', ...])",
+    )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default="2024-01-01",
+        help="Start date (YYYY-MM-DD, default: 2024-01-01)",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default="2024-06-30",
+        help="End date (YYYY-MM-DD, default: 2024-06-30)",
+    )
+    parser.add_argument(
+        "--config-path",
+        type=str,
+        default="config/config.yaml",
+        help="Path to config file (default: config/config.yaml)",
+    )
+    parser.add_argument(
+        "--qlib-dir",
+        type=str,
+        default=None,
+        help="Qlib data directory (default: ~/.qlib/qlib_data/cn_data)",
+    )
+    parser.add_argument(
+        "--test-granger",
+        action="store_true",
+        help="Run Granger causality test (may be slow)",
+    )
+    
+    args = parser.parse_args()
+    
     print("=" * 80)
     print("Enhanced Graph Data Builder Test")
     print("=" * 80)
     
-    # Generate mock data
-    print("\nGenerating mock data...")
-    returns_df, highs_df, lows_df, features_df, industry_map = generate_mock_data(
-        n_stocks=10, n_days=100
-    )
+    # Load data
+    if args.use_db:
+        print("\nLoading data from database...")
+        start_dt = datetime.strptime(args.start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(args.end_date, "%Y-%m-%d")
+        
+        returns_df, highs_df, lows_df, industry_map = load_data_from_database(
+            stocks=args.stocks,
+            start_date=start_dt,
+            end_date=end_dt,
+            config_path=args.config_path,
+        )
+        
+        # Generate mock features (since we don't have Alpha158 features in DB)
+        print("Generating mock features...")
+        n_days = len(returns_df)
+        n_stocks = len(returns_df.columns)
+        n_features = 158
+        
+        features_data = np.random.randn(n_days * n_stocks, n_features)
+        dates_repeated = np.repeat(returns_df.index, n_stocks)
+        symbols_repeated = list(returns_df.columns) * n_days
+        multi_index = pd.MultiIndex.from_arrays(
+            [dates_repeated, symbols_repeated],
+            names=["datetime", "instrument"]
+        )
+        features_df = pd.DataFrame(features_data, index=multi_index)
+        
+    elif args.use_qlib:
+        print("\nLoading data from Qlib...")
+        returns_df, highs_df, lows_df, industry_map = load_data_from_qlib(
+            stocks=args.stocks,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            qlib_dir=args.qlib_dir,
+        )
+        
+        # Generate mock features
+        print("Generating mock features...")
+        n_days = len(returns_df)
+        n_stocks = len(returns_df.columns)
+        n_features = 158
+        
+        features_data = np.random.randn(n_days * n_stocks, n_features)
+        dates_repeated = np.repeat(returns_df.index, n_stocks)
+        symbols_repeated = list(returns_df.columns) * n_days
+        multi_index = pd.MultiIndex.from_arrays(
+            [dates_repeated, symbols_repeated],
+            names=["datetime", "instrument"]
+        )
+        features_df = pd.DataFrame(features_data, index=multi_index)
+        
+    else:
+        # Generate mock data
+        print("\nGenerating mock data...")
+        returns_df, highs_df, lows_df, features_df, industry_map = generate_mock_data(
+            n_stocks=len(args.stocks), n_days=100
+        )
     
-    print(f"Generated data:")
+    print(f"\nData summary:")
     print(f"  Stocks: {len(returns_df.columns)}")
     print(f"  Trading days: {len(returns_df)}")
     print(f"  Features per stock: {features_df.shape[1]}")
-    print(f"  Industries: {len(set(industry_map.values()))}")
+    print(f"  Industries: {len(set(industry_map.values())) if industry_map else 0}")
     
     # Test individual correlation methods
     test_dynamic_cross_sectional_correlation(returns_df)
     test_cross_lagged_correlation(returns_df)
     test_volatility_sync(highs_df, lows_df)
     
-    # Note: Granger causality test may be slow, skip for quick test
-    # Uncomment to test:
-    # test_granger_causality(returns_df)
+    # Granger causality test (optional, may be slow)
+    if args.test_granger:
+        test_granger_causality(returns_df)
     
     test_transfer_entropy(returns_df)
     
