@@ -4,6 +4,7 @@ Uses EidosRepo to load data from database.
 """
 
 import logging
+from decimal import Decimal
 from typing import List
 
 import pandas as pd
@@ -63,6 +64,16 @@ class EidosDataLoader:
             if 'date' in ledger.columns:
                 ledger['date'] = pd.to_datetime(ledger['date'])
                 ledger = ledger.sort_values('date').reset_index(drop=True)
+            
+            # Convert Decimal types to float for numeric columns
+            # PostgreSQL NUMERIC type returns as Decimal, which causes issues with pandas operations
+            numeric_columns = ['nav', 'cash', 'market_value', 'deal_amount', 'turnover_rate']
+            for col in numeric_columns:
+                if col in ledger.columns:
+                    # Convert Decimal to float
+                    ledger[col] = ledger[col].apply(
+                        lambda x: float(x) if isinstance(x, Decimal) else (float(x) if x is not None else None)
+                    )
         else:
             ledger = pd.DataFrame()
         
@@ -73,6 +84,15 @@ class EidosDataLoader:
             # Ensure deal_time column is datetime
             if 'deal_time' in trades.columns:
                 trades['deal_time'] = pd.to_datetime(trades['deal_time'])
+            
+            # Convert Decimal types to float for numeric columns
+            numeric_columns = ['price', 'amount', 'rank_at_deal', 'score_at_deal', 'pnl_ratio']
+            for col in numeric_columns:
+                if col in trades.columns:
+                    # Convert Decimal to float
+                    trades[col] = trades[col].apply(
+                        lambda x: float(x) if isinstance(x, Decimal) else (float(x) if x is not None else None)
+                    )
         else:
             trades = pd.DataFrame()
         
@@ -83,6 +103,15 @@ class EidosDataLoader:
                 model_outputs = pd.DataFrame(model_outputs_data)
                 if 'date' in model_outputs.columns:
                     model_outputs['date'] = pd.to_datetime(model_outputs['date'])
+                
+                # Convert Decimal types to float for numeric columns
+                numeric_columns = ['score', 'rank']
+                for col in numeric_columns:
+                    if col in model_outputs.columns:
+                        # Convert Decimal to float
+                        model_outputs[col] = model_outputs[col].apply(
+                            lambda x: float(x) if isinstance(x, Decimal) else (float(x) if x is not None else None)
+                        )
             else:
                 model_outputs = pd.DataFrame()
         except Exception as e:

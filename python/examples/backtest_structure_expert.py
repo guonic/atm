@@ -353,10 +353,11 @@ class BaseCustomStrategy(TopkDropoutStrategy):
                           - trade_price: Trade price (价格)
         """
         if execute_result is None or len(execute_result) == 0:
+            logger.debug("post_exe_step called with empty or None execute_result")
             return
         
         # Process each executed order tuple
-        logger.debug(f"Processing {len(execute_result)} executed orders")
+        logger.info(f"post_exe_step: Processing {len(execute_result)} executed orders")
         for order_tuple in execute_result:
             # Unpack tuple: (order, trade_val, trade_cost, trade_price)
             if len(order_tuple) != 4:
@@ -376,12 +377,18 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             
             # Extract order information from qlib.backtest.decision.Order
             # Qlib Order object has: stock_id, amount, direction, factor, start_time, end_time, etc.
-            # direction must be 1 (Buy) or -1 (Sell) to satisfy database constraint
-            # Note: We've already filtered out direction==0 above, so order.direction is either 1 or -1
+            # Qlib's Order.direction: 1 = Buy, -1 = Sell, 0 = Cancel/Invalid
+            # Our database requires: 1 = Buy, -1 = Sell
+            # Skip orders with direction == 0 (cancelled/invalid)
+            if order.direction == 0:
+                logger.debug(f"Skipping order with direction=0: {order.stock_id}")
+                continue
+            
+            # Use Qlib's direction directly (1=Buy, -1=Sell)
             order_info = {
                 "instrument": order.stock_id,  # Qlib Order uses stock_id attribute
                 "amount": order.amount,
-                "direction": -1 if order.direction == 0 else 1,  # 1=Buy, -1=Sell (already filtered out 0)
+                "direction": int(order.direction),  # 1=Buy, -1=Sell (from Qlib)
                 "factor": order.factor,
                 "trade_val": float(trade_val),  # 交易量
                 "trade_cost": float(trade_cost),  # 成本
@@ -1097,6 +1104,32 @@ def generate_predictions(
     return predictions
 
 
+class TopkDropoutStrategyWithOrderCapture(BaseCustomStrategy):
+    """
+    Wrapper for TopkDropoutStrategy that adds order capture functionality.
+    
+    This class wraps Qlib's TopkDropoutStrategy to enable order tracking
+    while maintaining the same behavior.
+    """
+    
+    def __init__(
+        self,
+        signal: pd.DataFrame,
+        topk: int = 30,
+        n_drop: int = 5,
+    ):
+        """
+        Initialize TopkDropoutStrategy with order capture.
+        
+        Args:
+            signal: Signal DataFrame with MultiIndex (datetime, instrument) and 'score' column.
+            topk: Target number of stocks to hold.
+            n_drop: Number of bottom stocks to drop (default: 5).
+        """
+        # Initialize base class (BaseCustomStrategy) which inherits from TopkDropoutStrategy
+        super().__init__(signal=signal, topk=topk, n_drop=n_drop)
+
+
 def create_portfolio_strategy(
     predictions: pd.DataFrame,
     strategy_class: type = TopkDropoutStrategy,
@@ -1115,7 +1148,7 @@ def create_portfolio_strategy(
         retain_threshold: Retain threshold for SimpleLowTurnoverStrategy (default: None, uses 30 if SimpleLowTurnoverStrategy).
 
     Returns:
-        Strategy instance.
+        Strategy instance (always has get_executed_orders() method).
     """
     logger.info(f"Creating {strategy_class.__name__} with top_k={top_k}")
 
@@ -1149,15 +1182,29 @@ def create_portfolio_strategy(
             "retain_threshold": retain_threshold,
             "n_drop": 5,  # Drop bottom 5 to reduce turnover
         }
-    else:
-        # Use standard TopkDropoutStrategy
+    elif strategy_class == TopkDropoutStrategy:
+        # Use wrapped TopkDropoutStrategy with order capture
+        logger.info("Using TopkDropoutStrategy with order capture enabled")
         strategy_config = {
             "signal": signal,
             "topk": top_k,
             "n_drop": 5,  # Drop bottom 5 to reduce turnover
         }
+        # Use wrapper class that has order capture
+        strategy = TopkDropoutStrategyWithOrderCapture(**strategy_config)
+        return strategy
+    else:
+        # Unknown strategy class, use wrapped TopkDropoutStrategy as fallback
+        logger.warning(f"Unknown strategy class: {strategy_class.__name__}, using TopkDropoutStrategy with order capture")
+        strategy_config = {
+            "signal": signal,
+            "topk": top_k,
+            "n_drop": 5,  # Drop bottom 5 to reduce turnover
+        }
+        strategy = TopkDropoutStrategyWithOrderCapture(**strategy_config)
+        return strategy
 
-    # Initialize strategy
+    # Initialize strategy (for RefinedTopKStrategy and SimpleLowTurnoverStrategy)
     strategy = strategy_class(**strategy_config)
 
     return strategy
@@ -2480,6 +2527,18 @@ def main():
             skip_auto_detect=skip_auto_detect,
         )
 
+        # Check if orders were captured
+        if hasattr(strategy, "get_executed_orders"):
+            executed_orders = strategy.get_executed_orders()
+            logger.info(f"After backtest: Found {len(executed_orders)} executed orders in strategy")
+            if len(executed_orders) == 0:
+                logger.warning(
+                    "⚠️  No executed orders found in strategy instance. "
+                    "This may indicate that post_exe_step was not called by Qlib, "
+                    "or no trades were executed during backtest."
+                )
+        else:
+            logger.warning("Strategy instance does not have get_executed_orders() method")
 
         # Extract portfolio_metric and indicator from results
         portfolio_metric = results.get("portfolio_metric")
