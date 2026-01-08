@@ -112,7 +112,7 @@ import pandas as pd
 import qlib
 import torch
 from qlib.backtest import backtest, executor
-from qlib.backtest.decision import Order as QlibOrder
+from qlib.backtest.decision import Order as QlibOrder, OrderDir
 from qlib.contrib.data.handler import Alpha158
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
 from qlib.data import D
@@ -317,6 +317,60 @@ def execution_logic(
     return next_holdings
 
 
+def _convert_qlib_direction_to_db_direction(direction_value: Any, stock_id: str) -> Optional[int]:
+    """
+    Convert Qlib OrderDir enum to database direction value.
+    
+    Args:
+        direction_value: Qlib Order.direction value (OrderDir enum or int).
+        stock_id: Stock ID for logging purposes.
+    
+    Returns:
+        Database direction value: 1 for Buy, -1 for Sell, None if invalid.
+    """
+    # Handle OrderDir enum
+    if isinstance(direction_value, OrderDir):
+        if direction_value == OrderDir.SELL:
+            # OrderDir.SELL has value 0, but we need -1 for our database
+            return -1
+        elif direction_value == OrderDir.BUY:
+            # OrderDir.BUY has value 1, which matches our database
+            return 1
+        else:
+            # Unknown OrderDir value (shouldn't happen, but handle it)
+            logger.warning(
+                f"⚠️  Unknown OrderDir value: {direction_value} for {stock_id}. "
+                f"Skipping this order."
+            )
+            return None
+    elif isinstance(direction_value, int):
+        # Legacy support: if direction is already an int (shouldn't happen in newer Qlib)
+        if direction_value == 1:
+            return 1  # Buy
+        elif direction_value == -1:
+            return -1  # Sell
+        elif direction_value == 0:
+            # Could be OrderDir.SELL if treated as int, but we can't distinguish
+            # Log warning and skip to be safe
+            logger.warning(
+                f"⚠️  Direction value is 0 (int) for {stock_id}. "
+                f"This might be OrderDir.SELL, but we can't be sure. Skipping."
+            )
+            return None
+        else:
+            logger.warning(
+                f"⚠️  Unexpected direction value: {direction_value} (int) for {stock_id}. "
+                f"Skipping this order."
+            )
+            return None
+    else:
+        logger.warning(
+            f"⚠️  Unexpected direction type: {type(direction_value).__name__} for {stock_id}. "
+            f"Skipping this order."
+        )
+        return None
+
+
 class BaseCustomStrategy(TopkDropoutStrategy):
     """
     Base class for all custom strategies with order capture functionality.
@@ -358,6 +412,9 @@ class BaseCustomStrategy(TopkDropoutStrategy):
         
         # Process each executed order tuple
         logger.info(f"post_exe_step: Processing {len(execute_result)} executed orders")
+        buy_count = 0
+        sell_count = 0
+        skipped_count = 0
         for order_tuple in execute_result:
             # Unpack tuple: (order, trade_val, trade_cost, trade_price)
             if len(order_tuple) != 4:
@@ -368,27 +425,35 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             order, trade_val, trade_cost, trade_price = order_tuple
             
             # Debug: Log all order information to understand Qlib's direction values
-            logger.debug(
-                f"Order details: stock_id={order.stock_id}, "
-                f"direction={order.direction} (type={type(order.direction).__name__}), "
+            # Use INFO level for ALL orders to debug the sell order issue
+            # Check if this is a sell order by examining the order object
+            direction_value = order.direction
+            direction_type = type(direction_value).__name__
+            
+            # Log all order details to understand why sell orders are not captured
+            logger.info(
+                f"Raw order from Qlib: stock_id={order.stock_id}, "
+                f"direction={direction_value} (type={direction_type}), "
                 f"amount={order.amount}, price={trade_price}, "
-                f"hasattr(direction)={hasattr(order, 'direction')}"
+                f"hasattr(direction)={hasattr(order, 'direction')}, "
+                f"order.__dict__={getattr(order, '__dict__', 'N/A')}"
             )
             
             # Extract order information from qlib.backtest.decision.Order
             # Qlib Order object has: stock_id, amount, direction, factor, start_time, end_time, etc.
-            # Qlib's Order.direction: 1 = Buy, -1 = Sell, 0 = Cancel/Invalid
+            # IMPORTANT: Qlib's Order.direction is an OrderDir enum, not an integer!
+            # OrderDir.BUY = 1, OrderDir.SELL = 0 (not -1!)
             # Our database requires: 1 = Buy, -1 = Sell
-            # Skip orders with direction == 0 (cancelled/invalid)
-            if order.direction == 0:
-                logger.debug(f"Skipping order with direction=0: {order.stock_id}")
+            db_direction = _convert_qlib_direction_to_db_direction(order.direction, order.stock_id)
+            if db_direction is None:
+                skipped_count += 1
                 continue
             
-            # Use Qlib's direction directly (1=Buy, -1=Sell)
+            # Use converted direction value (1=Buy, -1=Sell)
             order_info = {
                 "instrument": order.stock_id,  # Qlib Order uses stock_id attribute
                 "amount": order.amount,
-                "direction": int(order.direction),  # 1=Buy, -1=Sell (from Qlib)
+                "direction": db_direction,  # 1=Buy, -1=Sell (converted from OrderDir)
                 "factor": order.factor,
                 "trade_val": float(trade_val),  # 交易量
                 "trade_cost": float(trade_cost),  # 成本
@@ -399,6 +464,12 @@ class BaseCustomStrategy(TopkDropoutStrategy):
             # Store order information
             self.executed_orders.append(order_info)
             
+            # Count buy/sell orders
+            if order_info["direction"] == 1:
+                buy_count += 1
+            elif order_info["direction"] == -1:
+                sell_count += 1
+            
             # Log order execution
             direction_str = "BUY" if order_info["direction"] == 1 else "SELL"
             date_str = f" on {order_info['deal_time']}" if order_info['deal_time'] else ""
@@ -407,6 +478,18 @@ class BaseCustomStrategy(TopkDropoutStrategy):
                 f"amount={order_info['amount']}, price={order_info['trade_price']:.4f}, "
                 f"val={order_info['trade_val']:.2f}, cost={order_info['trade_cost']:.2f}, "
                 f"direction={order_info['direction']} (order.direction={order.direction})"
+            )
+        
+        # Log summary for this execution step
+        if buy_count > 0 or sell_count > 0 or skipped_count > 0:
+            logger.info(
+                f"post_exe_step summary: {buy_count} BUY orders, {sell_count} SELL orders processed, "
+                f"{skipped_count} orders skipped (direction=0)"
+            )
+        if len(execute_result) > 0 and buy_count == 0 and sell_count == 0:
+            logger.warning(
+                f"⚠️  WARNING: {len(execute_result)} orders in execute_result but none were processed! "
+                f"This may indicate an issue with order.direction values or order format."
             )
     
     def get_executed_orders(self) -> List[Dict[str, Any]]:
@@ -524,24 +607,50 @@ class RefinedTopKStrategy(BaseCustomStrategy):
             kept_count = len(set(current_holdings) & set(selected_stocks))
             total_kept += kept_count
 
+            # Log stocks that are being removed (for debugging)
+            removed_stocks = set(current_holdings) - set(selected_stocks)
+            if removed_stocks:
+                logger.info(
+                    f"Date {date}: RefinedTopKStrategy will remove {len(removed_stocks)} stocks from holdings: {removed_stocks}"
+                )
+            else:
+                logger.debug(f"Date {date}: No stocks removed (kept all {len(current_holdings)} holdings)")
+
             # Update current holdings for next iteration
             current_holdings = selected_stocks
 
             # Modify signal: set low score for non-selected stocks
+            # This ensures Qlib's TopkDropoutStrategy will generate sell orders for removed stocks
+            # IMPORTANT: Qlib's TopkDropoutStrategy compares current portfolio with new signal
+            # If a stock in current portfolio has a low score in new signal, it will be sold
             if isinstance(date_signal, pd.Series):
                 if date_signal.name not in selected_stocks:
                     refined_signal.loc[(date, date_signal.name), 'score'] = -999.0
+                    logger.debug(f"Date {date}: Set low score (-999.0) for {date_signal.name} (not in selected)")
             else:
                 # Set low score for non-selected stocks
                 for stock in date_signal.index:
                     if stock not in selected_stocks:
                         refined_signal.loc[(date, stock), 'score'] = -999.0
+                        if stock in current_holdings:
+                            logger.info(
+                                f"Date {date}: Set low score (-999.0) for {stock} "
+                                f"(was in holdings, now removed from selected)"
+                            )
 
         # Log statistics
         avg_kept = total_kept / len(dates) if len(dates) > 0 else 0
         logger.info(
             f"Applied refined top K logic: average {avg_kept:.1f} holdings kept per day "
             f"(out of {topk}) with buffer_ratio={buffer_ratio}"
+        )
+        
+        # Log signal modification summary for debugging
+        total_stocks = len(refined_signal)
+        low_score_count = (refined_signal['score'] == -999.0).sum()
+        logger.debug(
+            f"Signal modification: {low_score_count}/{total_stocks} stocks have low score (-999.0) "
+            f"to trigger sell orders in Qlib TopkDropoutStrategy"
         )
 
         return refined_signal
