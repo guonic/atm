@@ -75,6 +75,11 @@ class DirectionalStockGNN(torch.nn.Module):
             hidden_channels, hidden_channels, edge_dim=edge_in_channels
         )
 
+        if node_in_channels != hidden_channels:
+            self.fc_shortcut = torch.nn.Linear(node_in_channels, hidden_channels)
+        else:
+            self.fc_shortcut = torch.nn.Identity()
+
         self.fc = torch.nn.Linear(hidden_channels, 1)  # Predict next period return
 
     def forward(
@@ -96,15 +101,20 @@ class DirectionalStockGNN(torch.nn.Module):
             Prediction tensor of shape [N, 1] containing predicted next period
             returns for each stock.
         """
+        # Reserve same dimension
+        identity = self.fc_shortcut(x)
+
         # First layer convolution: fuse node features with edge attributes
         x = self.conv1(x, edge_index, edge_attr=edge_attr)
-        x = torch.nn.functional.elu(x)
+        x = F.elu(x)
 
         # Second layer convolution: extract structural features deeply
         x = self.conv2(x, edge_index, edge_attr=edge_attr)
-        x = torch.nn.functional.elu(x)
+        x = F.elu(x)
 
-        return self.fc(x)
+        # Give more weight with
+        return self.fc(x + identity)
+
 
 class StructureExpertGNN(nn.Module):
     """
