@@ -467,13 +467,38 @@ class EidosTradesRepo:
             return 0
 
         logger = logging.getLogger(__name__)
-        logger.info(f"Inserting {len(trades_data)} trades for exp_id: {exp_id}")
+        
+        # Filter out trades with invalid amount (must be > 0 per database constraint)
+        filtered_trades = []
+        skipped_count = 0
+        for trade in trades_data:
+            amount = trade.get("amount", 0)
+            if amount is None or amount <= 0:
+                skipped_count += 1
+                logger.debug(
+                    f"Skipping trade with invalid amount: symbol={trade.get('symbol')}, "
+                    f"amount={amount}, side={trade.get('side', trade.get('direction'))}"
+                )
+                continue
+            filtered_trades.append(trade)
+        
+        if skipped_count > 0:
+            logger.warning(
+                f"Filtered out {skipped_count} trades with invalid amount (must be > 0) "
+                f"out of {len(trades_data)} total trades"
+            )
+        
+        if not filtered_trades:
+            logger.warning(f"No valid trades to insert after filtering for exp_id: {exp_id}")
+            return 0
+        
+        logger.info(f"Inserting {len(filtered_trades)} valid trades for exp_id: {exp_id}")
         
         engine = self._get_engine()
         total_inserted = 0
 
-        for i in range(0, len(trades_data), batch_size):
-            batch = trades_data[i : i + batch_size]
+        for i in range(0, len(filtered_trades), batch_size):
+            batch = filtered_trades[i : i + batch_size]
             sql = text(
                 f"""
                 INSERT INTO "{self.schema}"."{self.table_name}"

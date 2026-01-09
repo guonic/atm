@@ -19,7 +19,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -70,6 +70,77 @@ def get_feature_names() -> List[str]:
     handler = Alpha158(start_time="2020-01-01", end_time="2020-01-02")
     handler.setup_data()
     return handler.get_feature_names()
+
+
+def load_historical_data_for_correlation(
+    stock_list: List[str],
+    current_date: datetime,
+    window: int = 60,
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """
+    Load historical returns, highs, and lows data for correlation calculation.
+    
+    Args:
+        stock_list: List of stock symbols.
+        current_date: Current date to calculate lookback window from.
+        window: Lookback window size in trading days (default: 60).
+    
+    Returns:
+        Tuple of (returns_df, highs_df, lows_df) or (None, None, None) if failed.
+    """
+    try:
+        # Calculate start date (window days before current date)
+        # We need to get trading calendar to find the actual start date
+        calendar = D.calendar(end_time=current_date)
+        if len(calendar) < window:
+            # Not enough historical data
+            return None, None, None
+        
+        start_date = pd.Timestamp(calendar[-window])
+        end_date = pd.Timestamp(current_date)
+        
+        # Load OHLCV data
+        data = D.features(
+            instruments=stock_list,
+            fields=["$close", "$high", "$low"],
+            start_time=start_date.strftime("%Y-%m-%d"),
+            end_time=end_date.strftime("%Y-%m-%d"),
+        )
+        
+        if data.empty:
+            return None, None, None
+        
+        # Extract returns, highs, lows for each stock
+        returns_data = {}
+        highs_data = {}
+        lows_data = {}
+        
+        for stock in stock_list:
+            if stock in data.columns.get_level_values(0):
+                stock_data = data[stock]
+                # Calculate returns
+                returns = stock_data["$close"].pct_change().dropna()
+                returns_data[stock] = returns
+                highs_data[stock] = stock_data["$high"]
+                lows_data[stock] = stock_data["$low"]
+        
+        if not returns_data:
+            return None, None, None
+        
+        # Convert to DataFrames
+        returns_df = pd.DataFrame(returns_data)
+        highs_df = pd.DataFrame(highs_data)
+        lows_df = pd.DataFrame(lows_data)
+        
+        # Align indices and drop rows with all NaN
+        returns_df = returns_df.dropna(how="all")
+        highs_df = highs_df.dropna(how="all")
+        lows_df = lows_df.dropna(how="all")
+        
+        return returns_df, highs_df, lows_df
+    except Exception as e:
+        logger.warning(f"Failed to load historical data for correlation: {e}")
+        return None, None, None
 
 
 def train_rolling(
@@ -140,9 +211,29 @@ def train_rolling(
                 context=train_date_str,
             )
 
+            # Load historical data for correlation calculation if needed
+            returns_df = None
+            highs_df = None
+            lows_df = None
+            if use_edge_attr and builder.use_correlation:
+                stock_list_for_corr = df_x_aligned.index.get_level_values("instrument").unique().tolist()
+                returns_df, highs_df, lows_df = load_historical_data_for_correlation(
+                    stock_list_for_corr, train_date, window=builder.correlation_window
+                )
+                if returns_df is None:
+                    logger.warning(
+                        f"Failed to load historical data for {train_date_str}, "
+                        "using simple edge attributes instead"
+                    )
+            
             # Build graph for this date
             daily_graph = builder.get_daily_graph(
-                df_x_aligned, df_y_aligned, include_edge_attr=use_edge_attr
+                df_x_aligned,
+                df_y_aligned,
+                include_edge_attr=use_edge_attr,
+                returns_df=returns_df,
+                highs_df=highs_df,
+                lows_df=lows_df,
             )
 
             # Skip if no edges (no industry connections)
@@ -301,6 +392,19 @@ Examples:
         help="Number of edge attribute channels for DirectionalStockGNN (default: 4)",
     )
 
+    parser.add_argument(
+        "--use-correlation",
+        action="store_true",
+        help="Use correlation analysis for edge attributes (requires historical data)",
+    )
+
+    parser.add_argument(
+        "--correlation-window",
+        type=int,
+        default=60,
+        help="Window size for correlation calculation in trading days (default: 60)",
+    )
+
     args = parser.parse_args()
 
     # Parse dates
@@ -388,7 +492,11 @@ Examples:
         )
     
     trainer = StructureTrainer(model, lr=args.lr, device=args.device)
-    builder = GraphDataBuilder(industry_map)
+    builder = GraphDataBuilder(
+        industry_map,
+        use_correlation=args.use_correlation,
+        correlation_window=args.correlation_window,
+    )
 
     # Perform rolling training
     logger.info("Starting rolling training...")
