@@ -1,25 +1,23 @@
-## 变更描述
-<!-- 请简要描述本次 PR 的变更内容 -->
+## Description
+<!-- Brief description of changes -->
 
-## 变更类型
-<!-- 请勾选适用的选项 -->
-- [ ] Bug 修复
-- [ ] 新功能
-- [ ] 文档更新
-- [ ] 代码重构
-- [ ] 性能优化
-- [ ] 其他（请说明）
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Documentation update
+- [ ] Code refactoring
+- [ ] Performance optimization
+- [ ] Other (please specify)
 
-## 测试说明
-<!-- 请描述如何测试这些变更 -->
+## Testing
+<!-- How to test these changes -->
 
-## 检查清单
-- [ ] 代码已通过本地测试
-- [ ] 已添加/更新相关文档
-- [ ] 代码符合项目规范
-- [ ] 已检查是否有破坏性变更
+## Checklist
+- [ ] Code passes local tests
+- [ ] Documentation updated
+- [ ] Code follows project standards
+- [ ] No breaking changes
 
-## 相关 Issue
-<!-- 如果有相关的 Issue，请在此处引用 -->
+## Related Issues
+<!-- Link related issues here -->
 Closes #
-

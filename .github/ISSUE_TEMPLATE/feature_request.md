@@ -1,23 +1,19 @@
 ---
-name: 功能请求
-about: 为这个项目提出一个想法
+name: Feature Request
+about: Suggest an idea for this project
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
 ---
 
-## 功能描述
-<!-- 清晰简洁地描述你想要的功能 -->
+## Feature Description
+<!-- A clear and concise description of the feature -->
 
-## 问题描述
-<!-- 这个功能要解决什么问题？请描述你遇到的问题 -->
+## Problem Statement
+<!-- What problem does this feature solve? -->
 
-## 建议的解决方案
-<!-- 清晰简洁地描述你希望如何实现 -->
+## Proposed Solution
+<!-- How would you like to see this implemented? -->
 
-## 替代方案
-<!-- 清晰简洁地描述你考虑过的任何替代解决方案或功能 -->
-
-## 附加信息
-<!-- 添加关于功能请求的任何其他上下文或截图 -->
-
+## Additional Context
+<!-- Any other context, screenshots, or examples -->

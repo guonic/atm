@@ -1,34 +1,29 @@
 ---
-name: Bug 报告
-about: 创建一个报告来帮助我们改进
+name: Bug Report
+about: Create a report to help us improve
 title: '[BUG] '
 labels: bug
 assignees: ''
 ---
 
-## Bug 描述
-<!-- 清晰简洁地描述 bug -->
+## Bug Description
+<!-- A clear and concise description of the bug -->
 
-## 复现步骤
-1. 执行 '...'
-2. 点击 '....'
-3. 滚动到 '....'
-4. 看到错误
+## Steps to Reproduce
+1. 
+2. 
+3. 
 
-## 预期行为
-<!-- 描述你期望发生什么 -->
+## Expected Behavior
+<!-- What you expected to happen -->
 
-## 实际行为
-<!-- 描述实际发生了什么 -->
+## Actual Behavior
+<!-- What actually happened -->
 
-## 截图
-<!-- 如果适用，请添加截图以帮助解释问题 -->
+## Environment
+- OS: 
+- Version: 
+- Other relevant information:
 
-## 环境信息
-- OS: [例如: macOS 12.0]
-- 版本: [例如: 1.0.0]
-- 其他相关信息
-
-## 附加信息
-<!-- 添加关于问题的任何其他上下文 -->
-
+## Additional Context
+<!-- Any other context about the problem -->
