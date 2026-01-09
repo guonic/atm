@@ -211,6 +211,14 @@ def align_and_clean_features_labels(
         df_x, fill_value=fill_value, log_stats=log_stats, context=context_x
     )
 
+    # Validate cleaned features are not empty (same validation as Case 1)
+    if df_x_aligned.empty:
+        context_str = f" ({context})" if context else ""
+        raise ValueError(
+            f"Features DataFrame is empty after cleaning{context_str}. "
+            f"This may indicate all data was invalid or removed during cleaning."
+        )
+
     return df_x_aligned, None
 
 
