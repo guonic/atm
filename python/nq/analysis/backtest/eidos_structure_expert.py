@@ -121,6 +121,16 @@ def extract_trades_from_backtest_results(
                 )
                 continue
             
+            # Skip orders with invalid amount (must be > 0 per database constraint)
+            amount = int(order_info.get("amount", 0))
+            if amount <= 0:
+                logger.warning(
+                    f"Skipping order with invalid amount (must be > 0): "
+                    f"symbol={order_info.get('instrument', 'unknown')}, "
+                    f"amount={amount}, direction={direction}, price={order_info.get('trade_price', 0.0)}"
+                )
+                continue
+            
             # Extract deal_time from order if available
             deal_time = order_info.get("deal_time")
             if deal_time is not None:
@@ -137,7 +147,7 @@ def extract_trades_from_backtest_results(
                 "deal_time": deal_time,
                 "direction": direction,  # Must be 1 (Buy) or -1 (Sell), not 0
                 "price": float(order_info.get("trade_price", 0.0)),
-                "amount": int(order_info.get("amount", 0)),
+                "amount": amount,  # Already validated to be > 0 above
                 "rank_at_deal": order_info.get("rank_at_deal"),
                 "score_at_deal": order_info.get("score_at_deal"),
                 "reason": order_info.get("reason"),

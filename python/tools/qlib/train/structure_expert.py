@@ -28,6 +28,12 @@ from torch_geometric.nn import GATv2Conv
 # Add parent directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
+from nq.analysis.correlation.correlation import (
+    CrossLaggedCorrelation,
+    DynamicCrossSectionalCorrelation,
+    TransferEntropy,
+    VolatilitySync,
+)
 from tools.qlib.utils import clean_dataframe
 
 logger = logging.getLogger(__name__)
@@ -225,21 +231,47 @@ class GraphDataBuilder:
 
     Attributes:
         industry_map: Dictionary mapping stock codes to industry codes (L3 level).
+        use_correlation: Whether to use correlation analysis for edge attributes.
+        correlation_window: Window size for correlation calculation (default: 60).
     """
 
-    def __init__(self, industry_map: Dict[str, str]) -> None:
+    def __init__(
+        self,
+        industry_map: Dict[str, str],
+        use_correlation: bool = False,
+        correlation_window: int = 60,
+    ) -> None:
         """
         Initialize the GraphDataBuilder.
 
         Args:
             industry_map: Dictionary mapping stock codes to industry codes (L3 level).
                 Format: {stock_code: l3_code}
+            use_correlation: If True, use correlation analysis for edge attributes.
+                If False, use simple edge attributes (default: False).
+            correlation_window: Window size for correlation calculation (default: 60).
         """
         self.industry_map = industry_map
+        self.use_correlation = use_correlation
+        self.correlation_window = correlation_window
+        
+        # Initialize correlation analyzers if needed
+        if self.use_correlation:
+            self.cross_sectional = DynamicCrossSectionalCorrelation(
+                window=correlation_window
+            )
+            self.lagged = CrossLaggedCorrelation(lag=1)
+            self.volatility_sync = VolatilitySync()
+            self.transfer_entropy = TransferEntropy()
 
     def get_daily_graph(
-        self, df_x: pd.DataFrame, df_y: Optional[pd.DataFrame] = None, 
-        include_edge_attr: bool = False
+        self,
+        df_x: pd.DataFrame,
+        df_y: Optional[pd.DataFrame] = None,
+        include_edge_attr: bool = False,
+        returns_df: Optional[pd.DataFrame] = None,
+        highs_df: Optional[pd.DataFrame] = None,
+        lows_df: Optional[pd.DataFrame] = None,
     ) -> Data:
         """
         Convert Qlib format daily cross-sectional DataFrame to PyG Data object.
@@ -248,7 +280,18 @@ class GraphDataBuilder:
             df_x: Input features DataFrame with MultiIndex (datetime, instrument).
             df_y: Optional target values DataFrame with same index as df_x.
             include_edge_attr: If True, generate edge attributes for DirectionalStockGNN.
-                Edge attributes are simple 4D vectors based on industry relationships.
+                If use_correlation=True, edge attributes are 4D correlation metrics:
+                [correlation, lagged_weight, volatility_sync, transfer_entropy].
+                Otherwise, edge attributes are simple 4D vectors based on industry relationships.
+            returns_df: Optional DataFrame with historical returns data for correlation calculation.
+                Required if use_correlation=True and include_edge_attr=True.
+                Format: columns=symbols, index=dates, values=returns.
+            highs_df: Optional DataFrame with historical high prices for volatility sync.
+                Required if use_correlation=True and include_edge_attr=True.
+                Format: columns=symbols, index=dates, values=highs.
+            lows_df: Optional DataFrame with historical low prices for volatility sync.
+                Required if use_correlation=True and include_edge_attr=True.
+                Format: columns=symbols, index=dates, values=lows.
 
         Returns:
             PyTorch Geometric Data object containing:
@@ -297,22 +340,108 @@ class GraphDataBuilder:
             # so they won't have edges, but they will still be included in the graph
 
         edge_attr_list = []
-        for nodes in ind_to_nodes.values():
-            for i in nodes:
-                for j in nodes:
-                    if i != j:
-                        edge_index.append([i, j])
-                        # Generate simple edge attributes if requested
-                        # For DirectionalStockGNN, we use 4D edge attributes
-                        # [same_industry_flag, node_i_idx_normalized, node_j_idx_normalized, edge_count]
-                        if include_edge_attr:
-                            edge_attr = torch.tensor([
-                                1.0,  # Same industry flag
-                                float(i) / len(stock_list),  # Normalized source node index
-                                float(j) / len(stock_list),  # Normalized target node index
-                                1.0 / len(nodes),  # Inverse of industry size (edge density)
-                            ], dtype=torch.float)
-                            edge_attr_list.append(edge_attr)
+        # Build edges and edge attributes
+        if include_edge_attr:
+            # Calculate edge attributes using correlation analysis if enabled
+            if self.use_correlation and returns_df is not None:
+                # Use correlation analysis to calculate edge attributes
+                symbols = stock_list
+                
+                # Calculate correlation matrices
+                try:
+                    corr_matrix = self.cross_sectional.calculate(returns_df, symbols)
+                    lagged_corr, _ = self.lagged.calculate_matrix(returns_df, symbols)
+                    
+                    # Calculate volatility sync if high/low data available
+                    if highs_df is not None and lows_df is not None:
+                        sync_matrix = self.volatility_sync.calculate_matrix(
+                            highs_df, lows_df, symbols
+                        )
+                    else:
+                        sync_matrix = pd.DataFrame(0.0, index=symbols, columns=symbols)
+                    
+                    # Calculate transfer entropy
+                    te_matrix, _ = self.transfer_entropy.calculate_matrix(
+                        returns_df, symbols
+                    )
+                    
+                    # Build edge attributes for each edge using correlation metrics
+                    for nodes in ind_to_nodes.values():
+                        for i in nodes:
+                            for j in nodes:
+                                if i != j:
+                                    edge_index.append([i, j])
+                                    sym_i = stock_list[i]
+                                    sym_j = stock_list[j]
+                                    
+                                    # Extract correlation features
+                                    correlation = corr_matrix.loc[sym_i, sym_j] if (
+                                        sym_i in corr_matrix.index and
+                                        sym_j in corr_matrix.columns
+                                    ) else 0.0
+                                    lagged_weight = lagged_corr.loc[sym_i, sym_j] if (
+                                        sym_i in lagged_corr.index and
+                                        sym_j in lagged_corr.columns
+                                    ) else 0.0
+                                    volatility_sync = sync_matrix.loc[sym_i, sym_j] if (
+                                        sym_i in sync_matrix.index and
+                                        sym_j in sync_matrix.columns
+                                    ) else 0.0
+                                    transfer_entropy = te_matrix.loc[sym_i, sym_j] if (
+                                        sym_i in te_matrix.index and
+                                        sym_j in te_matrix.columns
+                                    ) else 0.0
+                                    
+                                    # Build 4D edge feature vector using correlation metrics
+                                    edge_attr = torch.tensor([
+                                        correlation,        # Cross-sectional correlation
+                                        lagged_weight,      # Lagged correlation weight
+                                        volatility_sync,    # Volatility sync score
+                                        transfer_entropy,   # Transfer entropy
+                                    ], dtype=torch.float)
+                                    edge_attr_list.append(edge_attr)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to calculate correlation-based edge attributes: {e}. "
+                        "Falling back to simple edge attributes."
+                    )
+                    # Fall back to simple edge attributes
+                    # Clear edge_index and edge_attr_list first
+                    edge_index = []
+                    edge_attr_list = []
+                    for nodes in ind_to_nodes.values():
+                        for i in nodes:
+                            for j in nodes:
+                                if i != j:
+                                    edge_index.append([i, j])
+                                    edge_attr = torch.tensor([
+                                        1.0,  # Same industry flag
+                                        float(i) / len(stock_list),  # Normalized source node index
+                                        float(j) / len(stock_list),  # Normalized target node index
+                                        1.0 / len(nodes),  # Inverse of industry size (edge density)
+                                    ], dtype=torch.float)
+                                    edge_attr_list.append(edge_attr)
+            else:
+                # Use simple edge attributes
+                for nodes in ind_to_nodes.values():
+                    for i in nodes:
+                        for j in nodes:
+                            if i != j:
+                                edge_index.append([i, j])
+                                edge_attr = torch.tensor([
+                                    1.0,  # Same industry flag
+                                    float(i) / len(stock_list),  # Normalized source node index
+                                    float(j) / len(stock_list),  # Normalized target node index
+                                    1.0 / len(nodes),  # Inverse of industry size (edge density)
+                                ], dtype=torch.float)
+                                edge_attr_list.append(edge_attr)
+        else:
+            # No edge attributes, just build edges
+            for nodes in ind_to_nodes.values():
+                for i in nodes:
+                    for j in nodes:
+                        if i != j:
+                            edge_index.append([i, j])
 
         if len(edge_index) == 0:
             edge_index = torch.zeros((2, 0), dtype=torch.long)

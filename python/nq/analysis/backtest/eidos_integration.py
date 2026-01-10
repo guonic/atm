@@ -132,12 +132,20 @@ class EidosBacktestWriter:
         # Check if trades are in metadata
         if "trades" in result.metadata:
             for trade in result.metadata["trades"]:
+                amount = trade.get("amount", 0)
+                # Skip trades with invalid amount (must be > 0 per database constraint)
+                if amount is None or amount <= 0:
+                    logger.debug(
+                        f"Skipping trade with invalid amount: symbol={result.ts_code}, "
+                        f"amount={amount}, deal_time={trade.get('deal_time', result.backtest_date)}"
+                    )
+                    continue
                 trades_data.append({
                     "symbol": result.ts_code,
                     "deal_time": trade.get("deal_time", result.backtest_date),
                     "direction": trade.get("direction", trade.get("side", 1)),  # 1=Buy, -1=Sell
                     "price": trade.get("price", 0.0),
-                    "amount": trade.get("amount", 0),
+                    "amount": amount,
                     "rank_at_deal": trade.get("rank_at_deal"),
                     "score_at_deal": trade.get("score_at_deal"),
                     "reason": trade.get("reason"),
@@ -148,13 +156,21 @@ class EidosBacktestWriter:
         # Check if signals are in metadata (convert signals to trades)
         elif "signals" in result.metadata:
             for signal in result.metadata["signals"]:
+                amount = signal.get("size", 0)
+                # Skip signals with invalid amount (must be > 0 per database constraint)
+                if amount is None or amount <= 0:
+                    logger.debug(
+                        f"Skipping signal with invalid amount: symbol={result.ts_code}, "
+                        f"amount={amount}, signal_type={signal.get('signal_type')}"
+                    )
+                    continue
                 direction = 1 if signal.get("signal_type") in ["buy", "add"] else -1
                 trades_data.append({
                     "symbol": result.ts_code,
                     "deal_time": signal.get("signal_time", result.backtest_date),
                     "direction": direction,
                     "price": signal.get("price", 0.0),
-                    "amount": signal.get("size", 0),
+                    "amount": amount,
                     "reason": signal.get("signal_type"),
                 })
 
