@@ -1,0 +1,3 @@
+"""
+Trading framework tests.
+"""
