@@ -2,7 +2,7 @@
 
 ## 概述
 
-新的交易框架（`python/trading/`）的回测结果**完全支持**用于训练 Exit Model。
+新的交易框架（`python/nq/trading/`）的回测结果**完全支持**用于训练 Exit Model。
 
 框架在回测过程中会自动记录：
 - 每日持仓快照（包含 entry_price, highest_price_since_entry, days_held 等）
@@ -47,8 +47,8 @@ python python/examples/backtest_trading_framework.py \
 从回测结果中提取训练数据：
 
 ```python
-from trading.backtest import run_custom_backtest
-from trading.utils.extract_exit_training_data import extract_from_backtest_results, save_training_data
+from nq.trading.backtest import run_custom_backtest
+from nq.trading.backtest.extract_training_data import extract_from_backtest_results, save_training_data
 
 # 假设你已经运行了回测并保存了结果
 # results = run_custom_backtest(...)
@@ -142,14 +142,14 @@ storage.save(f"snapshot:{date.strftime('%Y-%m-%d')}:{symbol}", snapshot)
 #!/usr/bin/env python3
 """Complete example: Run backtest and extract training data."""
 
-from trading.backtest import run_custom_backtest
-from trading.strategy import DualModelStrategy
-from trading.strategy.buy_models import StructureExpertBuyModel
-from trading.strategy.sell_models import MLExitSellModel
-from trading.state import Account, PositionManager, OrderBook
-from trading.logic import RiskManager, PositionAllocator
-from trading.storage import MemoryStorage
-from trading.utils.extract_exit_training_data import (
+from nq.trading.backtest import run_custom_backtest
+from nq.trading.strategies import DualModelStrategy
+from nq.trading.strategies.buy_models import StructureExpertBuyModel
+from nq.trading.strategies.sell_models import MLExitSellModel
+from nq.trading.state import Account, PositionManager, OrderBook
+from nq.trading.logic import RiskManager, PositionAllocator
+from nq.trading.storage import MemoryStorage
+from nq.trading.backtest.extract_training_data import (
     extract_from_backtest_results,
     save_training_data,
 )

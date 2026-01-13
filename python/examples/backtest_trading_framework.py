@@ -26,11 +26,6 @@ from pathlib import Path
 
 import qlib
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 from nq.config import load_config
 from nq.utils.industry import load_industry_map
 from tools.qlib.train.structure_expert import (
@@ -40,13 +35,13 @@ from tools.qlib.train.structure_expert import (
 from nq.analysis.exit import ExitModel
 
 # Import trading framework
-from trading.strategy import DualModelStrategy
-from trading.strategy.buy_models import StructureExpertBuyModel
-from trading.strategy.sell_models import MLExitSellModel
-from trading.state import Account, PositionManager, OrderBook
-from trading.logic import RiskManager, PositionAllocator
-from trading.storage import MemoryStorage
-from trading.backtest import run_custom_backtest
+from nq.trading.strategies import DualModelStrategy
+from nq.trading.strategies.buy_models import StructureExpertBuyModel
+from nq.trading.strategies.sell_models import MLExitSellModel
+from nq.trading.state import Account, PositionManager, OrderBook
+from nq.trading.logic import RiskManager, PositionAllocator
+from nq.trading.storage import MemoryStorage
+from nq.trading.backtest import run_custom_backtest
 
 # Configure logging
 logging.basicConfig(
@@ -216,6 +211,9 @@ def main():
     
     # Initialize position manager
     position_manager = PositionManager(account, storage)
+    
+    # Set position_manager reference in account (bidirectional relationship)
+    account.set_position_manager(position_manager)
     
     # Initialize order book
     order_book = OrderBook(storage)
