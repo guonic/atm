@@ -8,30 +8,22 @@ This strategy:
 """
 
 import logging
-from pathlib import Path
 from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
-from qlib.data import D
 from qlib.backtest.decision import Order, OrderDir
-from qlib.contrib.strategy.signal_strategy import SignalStrategy
-
-# Note: PYTHONPATH must be set to project root directory
-# Example: export PYTHONPATH=/path/to/atm:$PYTHONPATH
+from qlib.data import D
 
 from examples.backtest_structure_expert import (
     BaseCustomStrategy,
-    RefinedTopKStrategy,
-    _convert_qlib_direction_to_db_direction,
     get_refined_top_k,
 )
-from nq.analysis.exit import ExitModel, ExitFeatureBuilder
+from nq.analysis.exit import ExitModel
 
 logger = logging.getLogger(__name__)
 
 
-class MLExitStrategy(SignalStrategy):
+class MLExitStrategy(BaseCustomStrategy):
     """
     Strategy with ML-based exit model.
     
@@ -48,6 +40,7 @@ class MLExitStrategy(SignalStrategy):
         exit_scaler_path: Optional[str] = None,
         exit_threshold: float = 0.65,
         use_ml_exit: bool = True,
+        n_drop: int = 5,
     ):
         """
         Initialize MLExitStrategy.
@@ -60,9 +53,10 @@ class MLExitStrategy(SignalStrategy):
             exit_scaler_path: Path to feature scaler (if None, auto-generated).
             exit_threshold: Risk probability threshold for exit signal (default: 0.65).
             use_ml_exit: Whether to use ML exit model (default: True).
+            n_drop: Number of bottom stocks to drop (default: 5).
         """
-        # Initialize base SignalStrategy with signal
-        super().__init__(signal=signal)
+        # Initialize base TopkDropoutStrategy with required parameters
+        super().__init__(signal=signal, topk=topk, n_drop=n_drop)
         
         self.topk = topk
         self.buffer_ratio = buffer_ratio
@@ -96,20 +90,30 @@ class MLExitStrategy(SignalStrategy):
             logger.warning("use_ml_exit=True but no exit_model_path provided. ML exit disabled.")
             self.use_ml_exit = False
     
-    def generate_trade_decision(self, trade_exchange: "Exchange") -> List[Order]:
+    def generate_trade_decision(self, trade_exchange: Optional["Exchange"] = None) -> List[Order]:
         """
         Generate trade decisions for current trading day.
         
         This method is called by Qlib for each trading day to generate orders.
         
         Args:
-            trade_exchange: Qlib Exchange object.
+            trade_exchange: Qlib Exchange object (maybe None in some Qlib versions).
         
         Returns:
             List of Order objects.
         """
+        # Handle None trade_exchange (some Qlib versions pass None)
+        if trade_exchange is None:
+            logger.warning("trade_exchange is None, falling back to parent class generate_trade_decision")
+            # Fall back to parent class implementation (TopkDropoutStrategy)
+            return super().generate_trade_decision(trade_exchange)
+        
         # Get current date from trade_exchange
-        current_date = pd.Timestamp(trade_exchange.get_current_time())
+        try:
+            current_date = pd.Timestamp(trade_exchange.get_current_time())
+        except AttributeError:
+            logger.error("trade_exchange.get_current_time() failed, falling back to parent class")
+            return super().generate_trade_decision(trade_exchange)
         
         # Get current holdings
         current_holdings = self._get_current_holdings(trade_exchange)
