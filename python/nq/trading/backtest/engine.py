@@ -11,7 +11,7 @@ import pandas as pd
 from qlib.data import D
 
 from ..execution import Executor
-from ..strategies import DualModelStrategy
+from ..interfaces.strategy import IStrategy
 from ..utils.data_validation import validate_and_filter_nan
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ def _get_position_price(symbol: str, date: pd.Timestamp, market_data: pd.DataFra
 
 
 def run_custom_backtest(
-    strategy: DualModelStrategy,
+    strategy: IStrategy,
     start_date: str,
     end_date: str,
     initial_cash: float = 1000000.0,
@@ -68,7 +68,7 @@ def run_custom_backtest(
     4. Strategy generates orders, executor matches them
     
     Args:
-        strategy: DualModelStrategy instance (must have order_book, position_manager initialized).
+        strategy: IStrategy instance (must have order_book, position_manager initialized).
         start_date: Start date (YYYY-MM-DD).
         end_date: End date (YYYY-MM-DD).
         initial_cash: Initial cash amount (ignored if strategy already has account).
@@ -92,8 +92,8 @@ def run_custom_backtest(
     if storage_backend is None:
         storage_backend = position_manager.storage
     
-    # Initialize executor (use strategy's order_book and position_manager)
-    executor = Executor(position_manager, order_book)
+    # Initialize executor (use strategy's order_book and position_manager, pass strategy for data capture)
+    executor = Executor(position_manager, order_book, strategy=strategy)
     
     # Load trading calendar (use Qlib)
     calendar = D.calendar(start_time=start_date, end_time=end_date)
@@ -146,6 +146,11 @@ def run_custom_backtest(
     actual_instruments = market_data.index.get_level_values(0).unique().tolist()
     
     logger.info(f"Loaded market data for {len(actual_instruments)} instruments")
+    
+    # Notify strategy that backtest is starting
+    start_date_ts = pd.Timestamp(calendar[0])
+    end_date_ts = pd.Timestamp(calendar[-1])
+    strategy.on_backtest_start(start_date_ts, end_date_ts)
     
     # Backtest main loop
     snapshots = []
@@ -218,6 +223,9 @@ def run_custom_backtest(
             f"cash={snapshot['cash']:.2f}, positions={snapshot['position_count']}"
         )
     
+    # Notify strategy that backtest is ending
+    strategy.on_backtest_end()
+    
     # Collect results
     results = {
         'account': account,
@@ -226,6 +234,14 @@ def run_custom_backtest(
         'snapshots': snapshots,
         'storage': storage_backend,  # Include storage backend for data extraction
     }
+    
+    # Add strategy data if available
+    if hasattr(strategy, 'get_executed_orders'):
+        results['executed_orders'] = strategy.get_executed_orders()
+    if hasattr(strategy, 'get_signals'):
+        results['signals'] = strategy.get_signals()
+    if hasattr(strategy, 'get_daily_stats'):
+        results['daily_stats'] = strategy.get_daily_stats()
     
     logger.info("Backtest completed successfully")
     
