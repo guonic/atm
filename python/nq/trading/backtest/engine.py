@@ -27,33 +27,24 @@ def _get_position_price(symbol: str, date: pd.Timestamp, market_data: pd.DataFra
     Args:
         symbol: Stock symbol.
         date: Date to get price for.
-        market_data: Market data DataFrame (may have filtered rows).
+        market_data: Market data DataFrame (normalized format: MultiIndex index, single-level columns).
+            Must be normalized using normalize_qlib_features_result().
     
     Returns:
         Price if available, None if data is missing (e.g., stock suspended).
     """
     try:
-        if isinstance(market_data.index, pd.MultiIndex):
-            symbol_data = market_data.xs(symbol, level=0)
-            if date in symbol_data.index:
-                price = symbol_data.loc[date, '$close']
-                if pd.isna(price):
-                    # NaN means data is missing (possibly suspended)
-                    return None
-                return float(price)
-            else:
-                # Date was filtered out (NaN or suspended), return None
+        # Data is guaranteed to be in normalized format (MultiIndex index)
+        symbol_data = market_data.xs(symbol, level=0)
+        if date in symbol_data.index:
+            price = symbol_data.loc[date, '$close']
+            if pd.isna(price):
+                # NaN means data is missing (possibly suspended)
                 return None
+            return float(price)
         else:
-            if symbol in market_data.index:
-                price = market_data.loc[symbol, '$close']
-                if pd.isna(price):
-                    # NaN means data is missing (possibly suspended)
-                    return None
-                return float(price)
-            else:
-                # Symbol not found (possibly suspended)
-                return None
+            # Date was filtered out (NaN or suspended), return None
+            return None
     except (KeyError, IndexError) as e:
         # Date or symbol not found (likely filtered out or suspended)
         return None
@@ -151,10 +142,8 @@ def run_custom_backtest(
     )
     
     # Get actual instruments from loaded data (may differ from input if some stocks have no data)
-    if isinstance(market_data.index, pd.MultiIndex):
-        actual_instruments = market_data.index.get_level_values(0).unique().tolist()
-    else:
-        actual_instruments = market_data.index.unique().tolist()
+    # Data is guaranteed to be in normalized format (MultiIndex index)
+    actual_instruments = market_data.index.get_level_values(0).unique().tolist()
     
     logger.info(f"Loaded market data for {len(actual_instruments)} instruments")
     
