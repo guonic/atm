@@ -26,8 +26,8 @@
    - 训练退出模型
    - 保存模型和特征缩放器
 
-5. **策略集成** (`python/examples/backtest_structure_expert_ml_exit.py`)
-   - MLExitStrategy 类
+5. **策略集成** (`python/examples/backtest_exit_model.py`)
+   - 使用 `DualModelStrategy` + `MLExitSellModel`（自定义回测框架）
    - 集成退出模型到回测策略
 
 ## 使用流程
@@ -81,23 +81,56 @@ python python/tools/qlib/train/train_exit_model.py \
 
 ### 第三步：在策略中使用
 
-#### 方法1：使用 MLExitStrategy
+#### 方法1：使用 DualModelStrategy + MLExitSellModel（推荐）
 
 ```python
-from examples.backtest_structure_expert_ml_exit import MLExitStrategy
+from nq.trading.strategies import DualModelStrategy
+from nq.trading.strategies.buy_models import StructureExpertBuyModel
+from nq.trading.strategies.sell_models import MLExitSellModel
+from nq.trading.state import Account, PositionManager, OrderBook
+from nq.trading.logic import RiskManager, PositionAllocator
+from nq.trading.storage import MemoryStorage
+from nq.trading.backtest import run_custom_backtest
+from nq.analysis.exit import ExitModel
 
-# 创建策略实例
-strategy = MLExitStrategy(
-    signal=signal_df,
-    topk=30,
-    buffer_ratio=0.15,
-    exit_model_path='models/exit_model.pkl',
-    exit_threshold=0.65,  # 风险概率阈值
-    use_ml_exit=True,
+# 创建买入模型
+buy_model = StructureExpertBuyModel(...)
+
+# 创建卖出模型（ML Exit）
+exit_model = ExitModel.load('models/exit_model.pkl')
+sell_model = MLExitSellModel(
+    exit_model=exit_model,
+    threshold=0.65,  # 风险概率阈值
+)
+
+# 初始化交易组件
+storage = MemoryStorage()
+account = Account(account_id="backtest_001", available_cash=1000000, initial_cash=1000000)
+position_manager = PositionManager(account, storage)
+account.set_position_manager(position_manager)
+order_book = OrderBook(storage)
+risk_manager = RiskManager(account, position_manager, storage)
+position_allocator = PositionAllocator(target_positions=30)
+
+# 创建策略
+strategy = DualModelStrategy(
+    buy_model=buy_model,
+    sell_model=sell_model,
+    position_manager=position_manager,
+    order_book=order_book,
+    risk_manager=risk_manager,
+    position_allocator=position_allocator,
 )
 
 # 运行回测
-results = run_backtest(strategy, start_date, end_date)
+results = run_custom_backtest(
+    strategy=strategy,
+    start_date=start_date,
+    end_date=end_date,
+    initial_cash=1000000,
+    instruments=None,
+    storage_backend=storage,
+)
 ```
 
 #### 方法2：手动集成到现有策略
@@ -256,7 +289,7 @@ class MyStrategy(RefinedTopKStrategy):
 ## 示例代码
 
 完整的使用示例请参考：
-- `python/examples/backtest_structure_expert_ml_exit.py`
+- `python/examples/backtest_exit_model.py`（使用自定义回测框架）
 - `python/tools/qlib/train/train_exit_model.py`
 
 ## 相关文档

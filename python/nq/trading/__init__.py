@@ -18,7 +18,9 @@ Architecture:
 __version__ = "0.1.0"
 
 # Import main components for easy access
-from .strategies import DualModelStrategy
+from .strategies import AsymmetricStrategy
+# Keep DualModelStrategy as alias for backward compatibility
+from .strategies import AsymmetricStrategy as DualModelStrategy
 from .state import Account, PositionManager, OrderBook, Position, Order, OrderSide, OrderType, OrderStatus
 from .execution import Executor, FillInfo
 from .logic import RiskManager, PositionAllocator
@@ -26,7 +28,8 @@ from .storage import MemoryStorage
 from .backtest import run_custom_backtest
 
 __all__ = [
-    "DualModelStrategy",
+    "AsymmetricStrategy",
+    "DualModelStrategy",  # Alias for backward compatibility
     "Account",
     "PositionManager",
     "OrderBook",

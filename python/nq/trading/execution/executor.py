@@ -5,11 +5,12 @@ Executes orders and updates position/account state.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 import pandas as pd
 import logging
 
 from ..state import PositionManager, OrderBook, Order, OrderStatus, OrderSide
+from ..utils.data_normalizer import validate_normalized_format
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class Executor:
         self,
         position_manager: PositionManager,
         order_book: OrderBook,
+        strategy: Optional[Any] = None,
         commission_rate: float = 0.0015,
         slippage_rate: float = 0.0,
         min_commission: float = 5.0,
@@ -60,12 +62,14 @@ class Executor:
         Args:
             position_manager: PositionManager instance.
             order_book: OrderBook instance.
+            strategy: Strategy instance (optional, for data capture).
             commission_rate: Commission rate (default: 0.0015 = 0.15%).
             slippage_rate: Slippage rate (default: 0.0 = no slippage).
             min_commission: Minimum commission (default: 5.0).
         """
         self.position_manager = position_manager
         self.order_book = order_book
+        self.strategy = strategy
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
         self.min_commission = min_commission
@@ -264,6 +268,13 @@ class Executor:
         
         # Update position and account
         self._update_position_and_account(fill_info)
+        
+        # Capture executed order in strategy (if strategy supports it)
+        if self.strategy and hasattr(self.strategy, 'capture_executed_order'):
+            try:
+                self.strategy.capture_executed_order(order, fill_amount, fill_price)
+            except Exception as e:
+                logger.warning(f"Failed to capture executed order in strategy: {e}")
         
         logger.info(
             f"Order filled: {order.side.value} {order.symbol} "

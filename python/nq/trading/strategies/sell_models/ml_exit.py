@@ -85,17 +85,31 @@ class MLExitSellModel(ISellModel):
             # Unified format: Index=MultiIndex(instrument, datetime), Columns=single-level fields
             hist_data = normalize_qlib_features_result(raw_hist_data, instruments=[position.symbol])
             
-            # CRITICAL: Validate data for NaN before using it
+            # CRITICAL: Filter NaN values before using data (same as backtest engine)
+            # This prevents NaN from causing errors in exit model prediction
             required_fields = ['$close', '$high', '$low', '$volume']
-            if not validate_single_instrument_data(
-                data=hist_data,
+            from ...utils.data_validation import validate_and_filter_nan
+            
+            hist_data, nan_details = validate_and_filter_nan(
+                market_data=hist_data,
                 required_fields=required_fields,
-                symbol=position.symbol,
-                date=date
-            ):
+                context=f"exit model historical data for {position.symbol}"
+            )
+            
+            # Check if we have data for the current date after filtering
+            if hist_data.empty:
                 logger.warning(
-                    f"Invalid data (NaN or missing fields) for {position.symbol} on {date}. "
+                    f"No valid data after filtering for {position.symbol} on {date}. "
                     f"Skipping exit prediction."
+                )
+                return 0.0
+            
+            # Verify current date exists in filtered data
+            symbol_data = hist_data.xs(position.symbol, level=0) if isinstance(hist_data.index, pd.MultiIndex) else hist_data
+            if date not in symbol_data.index:
+                logger.debug(
+                    f"Current date {date} not in filtered historical data for {position.symbol}. "
+                    f"Data may have been filtered out due to NaN. Skipping exit prediction."
                 )
                 return 0.0
             

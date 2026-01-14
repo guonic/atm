@@ -7,7 +7,7 @@ backtest_trading_framework.py
 
 这个脚本展示了如何使用完全独立于 Qlib 状态管理的交易框架：
 - 使用自定义的 Account、Position、OrderBook
-- 使用 DualModelStrategy 协调买入和卖出模型
+- 使用 AsymmetricStrategy 协调买入和卖出模型
 - 使用自定义的 Executor 执行订单
 
 Usage:
@@ -35,7 +35,7 @@ from tools.qlib.train.structure_expert import (
 from nq.analysis.exit import ExitModel
 
 # Import trading framework
-from nq.trading.strategies import DualModelStrategy
+from nq.trading.strategies import AsymmetricStrategy
 from nq.trading.strategies.buy_models import StructureExpertBuyModel
 from nq.trading.strategies.sell_models import MLExitSellModel
 from nq.trading.state import Account, PositionManager, OrderBook
@@ -224,13 +224,14 @@ def main():
     
     # Create strategy
     logger.info("Creating dual-model strategy...")
-    strategy = DualModelStrategy(
+    strategy = AsymmetricStrategy(
         buy_model=buy_model,
         sell_model=sell_model,
         position_manager=position_manager,
         order_book=order_book,
         risk_manager=risk_manager,
         position_allocator=position_allocator,
+        account=account,
     )
     
     # Run backtest

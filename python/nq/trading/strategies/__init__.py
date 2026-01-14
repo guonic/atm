@@ -7,7 +7,9 @@ from .arg_parser import (
     validate_dates,
 )
 from .base import BaseStrategy, StrategyConfig
-from .dual_model import DualModelStrategy
+from .asymmetric import AsymmetricStrategy
+# Keep DualModelStrategy as alias for backward compatibility
+from .asymmetric import AsymmetricStrategy as DualModelStrategy
 from .buy_models import StructureExpertBuyModel
 from .sell_models import MLExitSellModel
 from .atr_strategy import ATRStrategy
@@ -65,8 +67,9 @@ __all__ = [
     "TripleMA135Strategy",
     "RSIMultiSignalStrategy",
     "ChipConcentrationStrategy",
-    # Dual-model strategy (new trading framework)
-    "DualModelStrategy",
+    # Asymmetric strategy (new trading framework)
+    "AsymmetricStrategy",
+    "DualModelStrategy",  # Alias for backward compatibility
     "StructureExpertBuyModel",
     "MLExitSellModel",
     # Utilities
