@@ -21,15 +21,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import qlib
 import torch
 from qlib.contrib.data.handler import Alpha158
 from qlib.data import D
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from nq.config import load_config
 from nq.utils.industry import load_industry_map

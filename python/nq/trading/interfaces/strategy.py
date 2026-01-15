@@ -5,7 +5,7 @@ Defines the core interface that all strategies must implement.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 import pandas as pd
 

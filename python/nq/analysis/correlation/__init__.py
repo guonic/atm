@@ -6,20 +6,24 @@ multi-center graph topologies to quantify stock interactions, causality, and inf
 """
 
 from .correlation import (
+    ICorrelationCalculator,
     DynamicCrossSectionalCorrelation,
     CrossLaggedCorrelation,
     VolatilitySync,
     GrangerCausality,
     TransferEntropy,
+    IndustryCorrelation,
 )
 from .graph_builder import EnhancedGraphDataBuilder
 
 __all__ = [
+    "ICorrelationCalculator",
     "DynamicCrossSectionalCorrelation",
     "CrossLaggedCorrelation",
     "VolatilitySync",
     "GrangerCausality",
     "TransferEntropy",
+    "IndustryCorrelation",
     "EnhancedGraphDataBuilder",
 ]
 
