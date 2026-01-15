@@ -7,11 +7,15 @@ Implements five core correlation calculation methods:
 3. Volatility Sync
 4. Granger Causality
 5. Transfer Entropy
+
+All correlation calculators implement the ICorrelationCalculator interface
+for unified usage patterns.
 """
 
 import logging
 import warnings
-from typing import List, Optional, Tuple
+from abc import ABC, abstractmethod
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -20,7 +24,73 @@ from statsmodels.tsa.stattools import grangercausalitytests
 logger = logging.getLogger(__name__)
 
 
-class DynamicCrossSectionalCorrelation:
+class ICorrelationCalculator(ABC):
+    """
+    Interface for correlation calculation methods.
+    
+    All correlation calculators should implement this interface to provide
+    a unified API for calculating stock correlations and building graph structures.
+    
+    The interface supports:
+    - Matrix calculation: Calculate correlation matrix for all stock pairs
+    - Pairwise calculation: Calculate correlation for a single stock pair
+    - Flexible return types: Single matrix or tuple of matrices (with direction/auxiliary data)
+    - Optional additional inputs: Some calculators may require extra data (e.g., highs, lows)
+    """
+    
+    @abstractmethod
+    def calculate_matrix(
+        self,
+        returns: pd.DataFrame,
+        symbols: Optional[List[str]] = None,
+        **kwargs
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        Calculate correlation matrix for all stock pairs.
+        
+        Args:
+            returns: DataFrame with returns data.
+                    Index: datetime
+                    Columns: stock symbols
+                    Values: returns
+            symbols: Optional list of symbols to calculate (if None, uses all columns).
+            **kwargs: Additional parameters (e.g., highs, lows for VolatilitySync).
+        
+        Returns:
+            Single DataFrame (symmetric matrix) or Tuple of DataFrames:
+            - For symmetric correlations: pd.DataFrame (correlation matrix)
+            - For directed correlations: Tuple[pd.DataFrame, pd.DataFrame]
+              (correlation matrix, direction/auxiliary matrix)
+        """
+        pass
+    
+    @abstractmethod
+    def calculate_pairwise(
+        self,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+        **kwargs
+    ) -> Union[float, Tuple[float, float], Tuple[float, float, Optional[str]], Tuple[bool, float, Optional[str]]]:
+        """
+        Calculate correlation between two stock series.
+        
+        Args:
+            returns_i: Return series for stock i.
+            returns_j: Return series for stock j.
+            **kwargs: Additional parameters.
+        
+        Returns:
+            Single value or tuple:
+            - For symmetric correlations: float (correlation coefficient)
+            - For directed correlations: Tuple[float, float, Optional[str]]
+              (corr_i_to_j, corr_j_to_i, direction)
+            - For causality tests: Tuple[bool, float, Optional[str]]
+              (is_causal, p_value, direction)
+        """
+        pass
+
+
+class DynamicCrossSectionalCorrelation(ICorrelationCalculator):
     """
     Dynamic Cross-Sectional Correlation calculator.
     
@@ -46,10 +116,11 @@ class DynamicCrossSectionalCorrelation:
         self.window = window
         self.threshold = 0.0 if threshold is None else threshold
     
-    def calculate(
+    def calculate_matrix(
         self,
         returns: pd.DataFrame,
         symbols: Optional[List[str]] = None,
+        **kwargs
     ) -> pd.DataFrame:
         """
         Calculate dynamic cross-sectional correlation matrix.
@@ -85,6 +156,16 @@ class DynamicCrossSectionalCorrelation:
         
         return correlation_matrix
     
+    def calculate(
+        self,
+        returns: pd.DataFrame,
+        symbols: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Alias for calculate_matrix (backward compatibility).
+        """
+        return self.calculate_matrix(returns, symbols)
+    
     def calculate_pairwise(
         self,
         returns_i: pd.Series,
@@ -113,7 +194,7 @@ class DynamicCrossSectionalCorrelation:
         return aligned["i"].corr(aligned["j"], method="spearman")
 
 
-class CrossLaggedCorrelation:
+class CrossLaggedCorrelation(ICorrelationCalculator):
     """
     Cross-Lagged Correlation calculator.
     
@@ -135,10 +216,11 @@ class CrossLaggedCorrelation:
         """
         self.lag = lag
     
-    def calculate_directed(
+    def calculate_pairwise(
         self,
         returns_i: pd.Series,
         returns_j: pd.Series,
+        **kwargs
     ) -> Tuple[float, float, Optional[str]]:
         """
         Calculate directed correlation between two stocks.
@@ -191,6 +273,16 @@ class CrossLaggedCorrelation:
         
         return corr_i_to_j, corr_j_to_i, direction
     
+    def calculate_directed(
+        self,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+    ) -> Tuple[float, float, Optional[str]]:
+        """
+        Alias for calculate_pairwise (backward compatibility).
+        """
+        return self.calculate_pairwise(returns_i, returns_j)
+    
     def calculate_matrix(
         self,
         returns: pd.DataFrame,
@@ -222,7 +314,7 @@ class CrossLaggedCorrelation:
                     direction_matrix.loc[sym_i, sym_j] = None
                     continue
                 
-                corr_i_to_j, corr_j_to_i, direction = self.calculate_directed(
+                corr_i_to_j, corr_j_to_i, direction = self.calculate_pairwise(
                     returns[sym_i], returns[sym_j]
                 )
                 
@@ -234,7 +326,7 @@ class CrossLaggedCorrelation:
         return corr_matrix, direction_matrix
 
 
-class VolatilitySync:
+class VolatilitySync(ICorrelationCalculator):
     """
     Volatility Sync calculator.
     
@@ -279,21 +371,37 @@ class VolatilitySync:
         range_values = np.log(aligned["high"] / aligned["low"])
         return range_values
     
-    def calculate_sync_rate(
+    def calculate_pairwise(
         self,
-        range_i: pd.Series,
-        range_j: pd.Series,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+        highs_i: Optional[pd.Series] = None,
+        highs_j: Optional[pd.Series] = None,
+        lows_i: Optional[pd.Series] = None,
+        lows_j: Optional[pd.Series] = None,
+        **kwargs
     ) -> float:
         """
         Calculate sync rate between two stocks.
         
         Args:
-            range_i: Range series for stock i.
-            range_j: Range series for stock j.
+            returns_i: Return series for stock i (required by interface, but not used).
+            returns_j: Return series for stock j (required by interface, but not used).
+            highs_i: High prices series for stock i.
+            highs_j: High prices series for stock j.
+            lows_i: Low prices series for stock i.
+            lows_j: Low prices series for stock j.
+            **kwargs: Additional parameters.
         
         Returns:
             Sync rate (0-1, closer to 1 means more synchronized).
         """
+        if highs_i is None or highs_j is None or lows_i is None or lows_j is None:
+            raise ValueError("VolatilitySync.calculate_pairwise requires 'highs_i', 'highs_j', 'lows_i', 'lows_j'")
+        
+        range_i = self.calculate_range(highs_i, lows_i)
+        range_j = self.calculate_range(highs_j, lows_j)
+        
         # Align indices
         aligned = pd.DataFrame({"i": range_i, "j": range_j}).dropna()
         
@@ -336,21 +444,28 @@ class VolatilitySync:
     
     def calculate_matrix(
         self,
-        highs: pd.DataFrame,
-        lows: pd.DataFrame,
+        returns: pd.DataFrame,
         symbols: Optional[List[str]] = None,
+        highs: Optional[pd.DataFrame] = None,
+        lows: Optional[pd.DataFrame] = None,
+        **kwargs
     ) -> pd.DataFrame:
         """
         Calculate volatility sync matrix for all pairs.
         
         Args:
+            returns: DataFrame with returns data (required by interface, but not used).
+            symbols: Optional list of symbols.
             highs: DataFrame with high prices (columns: symbols, index: dates).
             lows: DataFrame with low prices (columns: symbols, index: dates).
-            symbols: Optional list of symbols.
+            **kwargs: Additional parameters.
         
         Returns:
             Sync matrix DataFrame.
         """
+        if highs is None or lows is None:
+            raise ValueError("VolatilitySync requires 'highs' and 'lows' DataFrames")
+        
         if symbols is None:
             symbols = highs.columns.tolist()
         
@@ -375,7 +490,7 @@ class VolatilitySync:
         return sync_matrix
 
 
-class GrangerCausality:
+class GrangerCausality(ICorrelationCalculator):
     """
     Granger Causality test calculator.
     
@@ -402,26 +517,28 @@ class GrangerCausality:
         self.maxlag = maxlag
         self.significance_level = significance_level
     
-    def test(
+    def calculate_pairwise(
         self,
-        series_a: pd.Series,
-        series_b: pd.Series,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+        **kwargs
     ) -> Tuple[bool, float, Optional[str]]:
         """
-        Test if A Granger-causes B.
+        Test if returns_i Granger-causes returns_j.
         
         Args:
-            series_a: Time series A.
-            series_b: Time series B.
+            returns_i: Return series for stock i.
+            returns_j: Return series for stock j.
+            **kwargs: Additional parameters.
         
         Returns:
             Tuple of (is_causal, p_value, direction).
-            is_causal: True if A causes B (P < significance_level).
+            is_causal: True if returns_i causes returns_j (P < significance_level).
             p_value: Minimum P-value across all lags.
-            direction: 'A->B', 'B->A', or None.
+            direction: 'i->j', 'j->i', or None.
         """
         # Align indices
-        aligned = pd.DataFrame({"A": series_a, "B": series_b}).dropna()
+        aligned = pd.DataFrame({"A": returns_i, "B": returns_j}).dropna()
         
         if len(aligned) < self.maxlag + 10:  # Need enough data
             return False, 1.0, None
@@ -460,20 +577,20 @@ class GrangerCausality:
                 min_p_ba = min(p_values_ba)
                 is_causal_ba = min_p_ba < self.significance_level
             
-            # Determine direction
+            # Determine direction (map to 'i->j' format for consistency)
             if is_causal_ab and is_causal_ba:
                 # Both directions significant, choose stronger one
                 if min_p_ab < min_p_ba:
-                    direction = "A->B"
+                    direction = "i->j"
                     return True, min_p_ab, direction
                 else:
-                    direction = "B->A"
+                    direction = "j->i"
                     return True, min_p_ba, direction
             elif is_causal_ab:
-                direction = "A->B"
+                direction = "i->j"
                 return True, min_p_ab, direction
             elif is_causal_ba:
-                direction = "B->A"
+                direction = "j->i"
                 return True, min_p_ba, direction
             else:
                 return False, max(min_p_ab, min_p_ba), None
@@ -481,6 +598,18 @@ class GrangerCausality:
         except Exception as e:
             logger.warning(f"Granger causality test failed: {e}")
             return False, 1.0, None
+    
+    def test(
+        self,
+        series_a: pd.Series,
+        series_b: pd.Series,
+    ) -> Tuple[bool, float, Optional[str]]:
+        """
+        Alias for calculate_pairwise (backward compatibility).
+        
+        Note: Returns direction in 'i->j'/'j->i' format, not 'A->B'/'B->A'.
+        """
+        return self.calculate_pairwise(series_a, series_b)
     
     def calculate_matrix(
         self,
@@ -511,9 +640,15 @@ class GrangerCausality:
                 if i == j:
                     continue
                 
-                is_causal, p_value, direction = self.test(
+                is_causal, p_value, direction = self.calculate_pairwise(
                     returns[sym_i], returns[sym_j]
                 )
+                
+                # Map direction from 'i->j'/'j->i' to symbol-based direction
+                if direction == "i->j":
+                    direction = f"{sym_i}->{sym_j}"
+                elif direction == "j->i":
+                    direction = f"{sym_j}->{sym_i}"
                 
                 if direction == f"{sym_i}->{sym_j}":
                     causality_matrix.loc[sym_i, sym_j] = True
@@ -522,7 +657,7 @@ class GrangerCausality:
         return causality_matrix, p_value_matrix
 
 
-class TransferEntropy:
+class TransferEntropy(ICorrelationCalculator):
     """
     Transfer Entropy calculator.
     
@@ -639,24 +774,26 @@ class TransferEntropy:
         
         return conditional_entropy
     
-    def calculate(
+    def calculate_pairwise(
         self,
-        series_a: pd.Series,
-        series_b: pd.Series,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+        **kwargs
     ) -> Tuple[float, float, Optional[str]]:
         """
-        Calculate transfer entropy from A to B and B to A.
+        Calculate transfer entropy from returns_i to returns_j and returns_j to returns_i.
         
         Args:
-            series_a: Time series A.
-            series_b: Time series B.
+            returns_i: Return series for stock i.
+            returns_j: Return series for stock j.
+            **kwargs: Additional parameters.
         
         Returns:
-            Tuple of (TE_A_to_B, TE_B_to_A, direction).
-            direction: 'A->B', 'B->A', or None.
+            Tuple of (TE_i_to_j, TE_j_to_i, direction).
+            direction: 'i->j', 'j->i', or None.
         """
         # Align indices
-        aligned = pd.DataFrame({"A": series_a, "B": series_b}).dropna()
+        aligned = pd.DataFrame({"A": returns_i, "B": returns_j}).dropna()
         
         if len(aligned) < 10:  # Need enough data
             return 0.0, 0.0, None
@@ -740,9 +877,15 @@ class TransferEntropy:
                 if i == j:
                     continue
                 
-                te_i_to_j, te_j_to_i, direction = self.calculate(
+                te_i_to_j, te_j_to_i, direction = self.calculate_pairwise(
                     returns[sym_i], returns[sym_j]
                 )
+                
+                # Map direction from 'i->j'/'j->i' to symbol-based direction
+                if direction == "i->j":
+                    direction = f"{sym_i}->{sym_j}"
+                elif direction == "j->i":
+                    direction = f"{sym_j}->{sym_i}"
                 
                 # Store maximum TE
                 max_te = max(te_i_to_j, te_j_to_i)
@@ -750,4 +893,170 @@ class TransferEntropy:
                 direction_matrix.loc[sym_i, sym_j] = direction
         
         return te_matrix, direction_matrix
+
+
+class IndustryCorrelation(ICorrelationCalculator):
+    """
+    Industry-level Correlation calculator.
+    
+    Purpose: Calculate correlation at industry level by aggregating stock returns
+    within each industry and computing inter-industry correlations.
+    
+    Calculation logic:
+    1. Group stocks by industry
+    2. Calculate industry-level returns (e.g., average or weighted average)
+    3. Calculate correlation matrix between industries
+    
+    This provides a higher-level view of market structure and can be used
+    to identify industry clusters and sector relationships.
+    """
+    
+    def __init__(
+        self,
+        industry_map: dict,
+        aggregation_method: str = "mean",
+        window: int = 60,
+        threshold: Optional[float] = None,
+    ):
+        """
+        Initialize industry correlation calculator.
+        
+        Args:
+            industry_map: Dictionary mapping stock symbols to industry codes.
+            aggregation_method: Method to aggregate stock returns within industry.
+                              Options: 'mean' (default), 'median', 'weighted'.
+            window: Lookback window size for correlation calculation (default: 60).
+            threshold: Optional threshold for sparsification (e.g., 0.5).
+        """
+        self.industry_map = industry_map
+        self.aggregation_method = aggregation_method
+        self.window = window
+        self.threshold = 0.0 if threshold is None else threshold
+    
+    def _aggregate_industry_returns(
+        self,
+        returns: pd.DataFrame,
+        symbols: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Aggregate stock returns to industry-level returns.
+        
+        Args:
+            returns: DataFrame with stock returns (columns: stock symbols, index: dates).
+            symbols: Optional list of symbols to process.
+        
+        Returns:
+            DataFrame with industry returns (columns: industry codes, index: dates).
+        """
+        if symbols is None:
+            symbols = returns.columns.tolist()
+        
+        # Filter symbols that have industry mapping
+        valid_symbols = [s for s in symbols if s in self.industry_map]
+        if not valid_symbols:
+            logger.warning("No valid symbols with industry mapping found")
+            return pd.DataFrame()
+        
+        returns_subset = returns[valid_symbols]
+        
+        # Group by industry
+        industry_returns = {}
+        for symbol in valid_symbols:
+            industry = self.industry_map[symbol]
+            if industry not in industry_returns:
+                industry_returns[industry] = []
+            industry_returns[industry].append(symbol)
+        
+        # Aggregate returns for each industry
+        industry_df = pd.DataFrame(index=returns_subset.index)
+        
+        for industry, stock_list in industry_returns.items():
+            industry_stocks = [s for s in stock_list if s in returns_subset.columns]
+            if not industry_stocks:
+                continue
+            
+            industry_data = returns_subset[industry_stocks]
+            
+            if self.aggregation_method == "mean":
+                industry_df[industry] = industry_data.mean(axis=1)
+            elif self.aggregation_method == "median":
+                industry_df[industry] = industry_data.median(axis=1)
+            elif self.aggregation_method == "weighted":
+                # Equal weight for now (could be extended to market cap weighted)
+                industry_df[industry] = industry_data.mean(axis=1)
+            else:
+                logger.warning(f"Unknown aggregation method: {self.aggregation_method}, using mean")
+                industry_df[industry] = industry_data.mean(axis=1)
+        
+        return industry_df
+    
+    def calculate_matrix(
+        self,
+        returns: pd.DataFrame,
+        symbols: Optional[List[str]] = None,
+        **kwargs
+    ) -> pd.DataFrame:
+        """
+        Calculate industry-level correlation matrix.
+        
+        Args:
+            returns: DataFrame with stock returns (columns: stock symbols, index: dates).
+            symbols: Optional list of symbols to calculate (if None, uses all columns).
+            **kwargs: Additional parameters.
+        
+        Returns:
+            Industry correlation matrix DataFrame (symmetric).
+        """
+        # Aggregate to industry level
+        industry_returns = self._aggregate_industry_returns(returns, symbols)
+        
+        if industry_returns.empty:
+            logger.warning("No industry returns calculated")
+            return pd.DataFrame()
+        
+        # Use rolling window if data is longer than window
+        if len(industry_returns) > self.window:
+            industry_returns = industry_returns.iloc[-self.window:]
+        
+        # Calculate correlation matrix
+        correlation_matrix = industry_returns.corr(method="spearman")
+        
+        # Apply threshold if specified
+        correlation_matrix = correlation_matrix.where(
+            abs(correlation_matrix) >= self.threshold, 0.0
+        )
+        
+        return correlation_matrix
+    
+    def calculate_pairwise(
+        self,
+        returns_i: pd.Series,
+        returns_j: pd.Series,
+        **kwargs
+    ) -> float:
+        """
+        Calculate correlation between two industry return series.
+        
+        Note: This method expects industry-level returns, not stock-level returns.
+        For stock-level inputs, use calculate_matrix() instead.
+        
+        Args:
+            returns_i: Return series for industry i (or stock i if industry mapping exists).
+            returns_j: Return series for industry j (or stock j if industry mapping exists).
+            **kwargs: Additional parameters.
+        
+        Returns:
+            Correlation coefficient.
+        """
+        # Align indices
+        aligned = pd.DataFrame({"i": returns_i, "j": returns_j}).dropna()
+        
+        if len(aligned) < 2:
+            return 0.0
+        
+        # Use rolling window if needed
+        if len(aligned) > self.window:
+            aligned = aligned.iloc[-self.window:]
+        
+        return aligned["i"].corr(aligned["j"], method="spearman")
 

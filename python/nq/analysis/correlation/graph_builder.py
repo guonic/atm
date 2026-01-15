@@ -96,14 +96,16 @@ class EnhancedGraphDataBuilder:
         edge_features = {}
         
         # Calculate cross-sectional correlation matrix
-        corr_matrix = self.cross_sectional.calculate(returns, symbols)
+        corr_matrix = self.cross_sectional.calculate_matrix(returns, symbols)
         
         # Calculate lagged correlation matrix
         lagged_corr, lagged_dir = self.lagged.calculate_matrix(returns, symbols)
         
         # Calculate volatility sync matrix (if high/low data available)
         if highs is not None and lows is not None:
-            sync_matrix = self.volatility_sync.calculate_matrix(highs, lows, symbols)
+            sync_matrix = self.volatility_sync.calculate_matrix(
+                returns, symbols, highs=highs, lows=lows
+            )
         else:
             sync_matrix = pd.DataFrame(0.0, index=symbols, columns=symbols)
         
