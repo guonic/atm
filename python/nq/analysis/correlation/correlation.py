@@ -540,7 +540,17 @@ class GrangerCausality(ICorrelationCalculator):
         # Align indices
         aligned = pd.DataFrame({"A": returns_i, "B": returns_j}).dropna()
         
-        if len(aligned) < self.maxlag + 10:  # Need enough data
+        # Calculate maximum allowable lag based on data length
+        # Need at least maxlag + 10 observations for reliable test
+        max_allowable_lag = max(1, (len(aligned) - 10) // 2)  # Conservative estimate
+        effective_maxlag = min(self.maxlag, max_allowable_lag)
+        
+        if effective_maxlag < 1 or len(aligned) < effective_maxlag + 10:
+            logger.debug(
+                f"Insufficient data for Granger test: "
+                f"len={len(aligned)}, maxlag={self.maxlag}, "
+                f"max_allowable={max_allowable_lag}"
+            )
             return False, 1.0, None
         
         try:
@@ -551,30 +561,32 @@ class GrangerCausality(ICorrelationCalculator):
                 # Test A -> B
                 test_ab = grangercausalitytests(
                     aligned[["B", "A"]],
-                    maxlag=self.maxlag,
+                    maxlag=effective_maxlag,
+                    verbose=False,
                 )
                 
                 # Get minimum P-value across all lags
                 p_values_ab = []
-                for lag in range(1, self.maxlag + 1):
+                for lag in range(1, effective_maxlag + 1):
                     p_value = test_ab[lag][0]["ssr_ftest"][1]  # F-test P-value
                     p_values_ab.append(p_value)
                 
-                min_p_ab = min(p_values_ab)
+                min_p_ab = min(p_values_ab) if p_values_ab else 1.0
                 is_causal_ab = min_p_ab < self.significance_level
                 
                 # Test B -> A
                 test_ba = grangercausalitytests(
                     aligned[["A", "B"]],
-                    maxlag=self.maxlag,
+                    maxlag=effective_maxlag,
+                    verbose=False,
                 )
                 
                 p_values_ba = []
-                for lag in range(1, self.maxlag + 1):
+                for lag in range(1, effective_maxlag + 1):
                     p_value = test_ba[lag][0]["ssr_ftest"][1]
                     p_values_ba.append(p_value)
                 
-                min_p_ba = min(p_values_ba)
+                min_p_ba = min(p_values_ba) if p_values_ba else 1.0
                 is_causal_ba = min_p_ba < self.significance_level
             
             # Determine direction (map to 'i->j' format for consistency)

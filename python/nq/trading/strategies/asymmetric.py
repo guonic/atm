@@ -9,7 +9,7 @@ This strategy implements the dual-model approach where buy and sell decisions
 are made by separate models, allowing for asymmetric trading logic.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, List
 import pandas as pd
 import logging
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ..state import PositionManager
     from ..logic import RiskManager, PositionAllocator
     from ..state import Account, OrderBook
+    from nq.analysis.correlation import CorrelationFilter
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class AsymmetricStrategy(BaseCustomStrategy):
         risk_manager: 'RiskManager',
         position_allocator: 'PositionAllocator',
         account: 'Account',
+        correlation_filter: Optional['CorrelationFilter'] = None,
     ):
         """
         Initialize asymmetric strategy.
@@ -63,6 +65,8 @@ class AsymmetricStrategy(BaseCustomStrategy):
             risk_manager: RiskManager instance.
             position_allocator: PositionAllocator instance.
             account: Account instance.
+            correlation_filter: Optional correlation filter for stock selection.
+                             If provided, will filter stocks based on correlation metrics.
         """
         super().__init__(
             position_manager=position_manager,
@@ -73,6 +77,7 @@ class AsymmetricStrategy(BaseCustomStrategy):
         )
         self.buy_model = buy_model
         self.sell_model = sell_model
+        self.correlation_filter = correlation_filter
     
     @property
     def name(self) -> str:
@@ -231,6 +236,46 @@ class AsymmetricStrategy(BaseCustomStrategy):
             exclude_symbols = current_symbols | sell_symbols
             available_ranks = ranks[~ranks['symbol'].isin(exclude_symbols)]
             
+            # Apply correlation filter if configured
+            if self.correlation_filter is not None:
+                try:
+                    # Load historical returns data for correlation calculation
+                    returns_data = self._load_returns_data_for_filter(
+                        symbols=available_ranks['symbol'].tolist(),
+                        date=date,
+                    )
+                    
+                    if returns_data is not None and not returns_data.empty:
+                        # Apply correlation filter
+                        filtered_ranks = self.correlation_filter.filter_stocks(
+                            ranks_df=available_ranks,
+                            returns_data=returns_data,
+                            date=date,
+                        )
+                        
+                        if not filtered_ranks.empty:
+                            available_ranks = filtered_ranks
+                            logger.debug(
+                                f"[{self.name}] Correlation filter applied: "
+                                f"{len(ranks)} -> {len(available_ranks)} stocks"
+                            )
+                        else:
+                            logger.warning(
+                                f"[{self.name}] Correlation filter removed all stocks, "
+                                f"using original ranks"
+                            )
+                    else:
+                        logger.debug(
+                            f"[{self.name}] No returns data available for correlation filter, "
+                            f"skipping filter"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[{self.name}] Failed to apply correlation filter: {e}, "
+                        f"using original ranks",
+                        exc_info=True
+                    )
+            
             # Calculate how many positions we can buy
             max_buy_count = self.position_allocator.target_positions - effective_positions
             top_k = available_ranks.head(max_buy_count)
@@ -305,6 +350,95 @@ class AsymmetricStrategy(BaseCustomStrategy):
             f"submitted {submitted_count} orders on {date.strftime('%Y-%m-%d')} "
             f"(positions: {current_positions}, target: {self.position_allocator.target_positions})"
         )
+    
+    def _load_returns_data_for_filter(
+        self,
+        symbols: List[str],
+        date: pd.Timestamp,
+        lookback_days: int = 60,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Load historical returns data for correlation filter.
+        
+        Args:
+            symbols: List of stock symbols.
+            date: Current date.
+            lookback_days: Number of days to look back (default: 60).
+        
+        Returns:
+            DataFrame with returns data (columns: symbols, index: dates) or None if failed.
+        """
+        try:
+            from qlib.data import D
+            from ..utils.data_normalizer import normalize_qlib_features_result
+            
+            # Calculate start date
+            start_date = date - pd.Timedelta(days=lookback_days * 2)  # Buffer for trading days
+            
+            # Load close prices
+            price_data = D.features(
+                instruments=symbols,
+                fields=["$close"],
+                start_time=start_date.strftime("%Y-%m-%d"),
+                end_time=date.strftime("%Y-%m-%d"),
+            )
+            
+            if price_data.empty:
+                return None
+            
+            # Normalize data format
+            normalized_data = normalize_qlib_features_result(price_data)
+            
+            if normalized_data.empty:
+                return None
+            
+            # Calculate returns for each instrument
+            returns_data = {}
+            
+            for symbol in symbols:
+                try:
+                    if not isinstance(normalized_data.index, pd.MultiIndex):
+                        continue
+                    
+                    instrument_data = normalized_data.loc[symbol, :]
+                    
+                    if instrument_data.empty:
+                        continue
+                    
+                    # Get close prices
+                    if isinstance(instrument_data, pd.Series):
+                        close_prices = instrument_data
+                    elif '$close' in instrument_data.columns:
+                        close_prices = instrument_data['$close']
+                    elif len(instrument_data.columns) == 1:
+                        close_prices = instrument_data.iloc[:, 0]
+                    else:
+                        continue
+                    
+                    # Calculate returns
+                    returns = close_prices.pct_change().dropna()
+                    
+                    if not returns.empty:
+                        returns_data[symbol] = returns
+                
+                except KeyError:
+                    continue
+                except Exception as e:
+                    logger.debug(f"Failed to calculate returns for {symbol}: {e}")
+                    continue
+            
+            if not returns_data:
+                return None
+            
+            # Convert to DataFrame
+            returns_df = pd.DataFrame(returns_data)
+            returns_df = returns_df.sort_index()
+            
+            return returns_df
+        
+        except Exception as e:
+            logger.debug(f"Failed to load returns data for correlation filter: {e}")
+            return None
     
     def _capture_daily_stats(
         self,

@@ -127,11 +127,34 @@ class StructureExpertBuyModel(IBuyModel):
                 logger.warning(f"No features loaded for {date.strftime('%Y-%m-%d')}")
                 return pd.DataFrame(columns=['symbol', 'score', 'rank'])
             
+            # Load historical data for edge attributes if needed
+            returns_df = None
+            highs_df = None
+            lows_df = None
+            if is_directional:
+                try:
+                    from tools.qlib.train.train_structure_expert import load_historical_data_for_correlation
+                    from datetime import datetime as dt
+                    
+                    returns_df, highs_df, lows_df = load_historical_data_for_correlation(
+                        stock_list=instruments,
+                        current_date=dt.combine(date.date(), dt.min.time()),
+                        window=self.builder.correlation_window if hasattr(self.builder, 'correlation_window') else 60,
+                    )
+                    
+                    if returns_df is None:
+                        logger.debug(f"Could not load historical data for {date.strftime('%Y-%m-%d')}, using simple edge attributes")
+                except Exception as e:
+                    logger.debug(f"Failed to load historical data for correlation: {e}")
+            
             # Build graph
             daily_graph = self.builder.get_daily_graph(
                 df_x,
                 None,
-                include_edge_attr=is_directional
+                include_edge_attr=is_directional,
+                returns_df=returns_df,
+                highs_df=highs_df,
+                lows_df=lows_df,
             )
             
             if daily_graph.x.shape[0] == 0:
