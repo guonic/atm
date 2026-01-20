@@ -46,45 +46,73 @@ def normalize_qlib_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     
-    # Case 1: Already normalized (MultiIndex index, single-level columns)
+    # Case 1: MultiIndex index, single-level columns
     if isinstance(df.index, pd.MultiIndex) and not isinstance(df.columns, pd.MultiIndex):
-        # Already in target format
+        # Ensure level names are correct and order is (instrument, datetime)
+        if len(df.index.levels) >= 2:
+            level_names = [n.lower() if n else "" for n in df.index.names]
+            
+            # Check if first level looks like datetime
+            first_level_is_date = False
+            try:
+                # Check if first element of level 0 is a timestamp or date-like
+                first_val = df.index.get_level_values(0)[0]
+                if isinstance(first_val, (pd.Timestamp, pd.DatetimeIndex)) or \
+                   hasattr(first_val, 'year'):
+                    first_level_is_date = True
+            except:
+                pass
+                
+            if "datetime" in level_names[0] or "date" in level_names[0] or first_level_is_date:
+                # Levels might be swapped: (datetime, instrument)
+                # Check if second level is NOT a date
+                second_level_is_date = False
+                try:
+                    second_val = df.index.get_level_values(1)[0]
+                    if isinstance(second_val, (pd.Timestamp, pd.DatetimeIndex)) or \
+                       hasattr(second_val, 'year'):
+                        second_level_is_date = True
+                except:
+                    pass
+                
+                if not second_level_is_date or "instrument" in level_names[1] or "symbol" in level_names[1]:
+                    # Confirmed swapped: (datetime, instrument) -> (instrument, datetime)
+                    df = df.swaplevel(0, 1).sort_index()
+        
+        # Consistent level names
+        df.index.names = ['instrument', 'datetime']
         return df
     
     # Case 2: Single-level index, MultiIndex columns
-    # Format: Index=datetime, Columns=MultiIndex(instrument, field)
+    # Format: Index=datetime, Columns=MultiIndex(instrument, field) or MultiIndex(field, instrument)
     if not isinstance(df.index, pd.MultiIndex) and isinstance(df.columns, pd.MultiIndex):
-        # Extract instrument and field from columns
-        instruments = df.columns.get_level_values(0).unique().tolist()
-        fields = df.columns.get_level_values(1).unique().tolist()
-        
-        # Build new DataFrame with MultiIndex (instrument, datetime)
-        # Use stack/unstack to reshape more efficiently
-        # First, set index name if not set
+        # Set index name if not set
         if df.index.name is None:
             df.index.name = 'datetime'
+            
+        # Determine which level is instrument
+        col_level_names = [n.lower() if n else "" for n in df.columns.names]
+        instrument_level = 0
+        if "field" in col_level_names[0] or "$" in str(df.columns.get_level_values(0)[0]):
+            instrument_level = 1
+            
+        # Stack instrument level to index
+        normalized_df = df.stack(level=instrument_level)
         
-        # Stack to get (datetime, instrument, field) structure
-        stacked = df.stack(level=0)  # Stack instrument level
-        stacked.index.names = ['datetime', 'instrument']
-        
-        # Unstack field level to get fields as columns
-        normalized_df = stacked.unstack(level=-1)  # Unstack field level
-        
-        # Swap levels to get (instrument, datetime) index
+        # Now index is (datetime, instrument)
+        # Swap to get (instrument, datetime)
         normalized_df = normalized_df.swaplevel(0, 1).sort_index()
+        normalized_df.index.names = ['instrument', 'datetime']
         
-        # Flatten column MultiIndex to single level (keep only field names)
-        normalized_df.columns = normalized_df.columns.get_level_values(-1)
-        
+        # If columns are still MultiIndex (happens if multiple levels remained), flatten them
+        if isinstance(normalized_df.columns, pd.MultiIndex):
+            normalized_df.columns = normalized_df.columns.get_level_values(-1)
+            
         return normalized_df
     
     # Case 3: Single-level index, single-level columns
-    # This happens when querying single instrument
-    # We need to infer the instrument from context or use a placeholder
+    # Still requires external instrument info
     if not isinstance(df.index, pd.MultiIndex) and not isinstance(df.columns, pd.MultiIndex):
-        # This is tricky - we don't know the instrument
-        # For now, raise an error and require instrument to be passed
         raise ValueError(
             "Cannot normalize single-level index/columns without instrument information. "
             "Please use normalize_qlib_dataframe_with_instrument() instead."

@@ -159,30 +159,40 @@ class CorrelationOptimizer:
                 # Evaluate each threshold
                 for threshold in self.thresholds:
                     # Apply filtering and calculate metrics
-                    metrics = self._evaluate_filtering(
+                    # Now also includes accuracy metrics
+                    evaluation_results = self._evaluate_filtering_and_accuracy(
                         daily_ranks=daily_ranks,
                         return_matrix=return_matrix,
+                        returns_data=returns_data,
                         correlation_matrices=correlation_matrices,
                         threshold=threshold,
                         target_periods=target_periods,
                     )
                     
                     # Add metadata
-                    for period, period_metrics in metrics.items():
+                    for period, metrics in evaluation_results.items():
                         result_row = {
                             'algorithm': algo_name,
                             'window': window,
                             'threshold': threshold,
                             'target_period': period,
-                            **period_metrics,
+                            **metrics,
                         }
                         results.append(result_row)
         
         result_df = pd.DataFrame(results)
         
-        logger.info(
-            f"Optimization completed: {len(result_df)} combinations evaluated"
-        )
+        if result_df.empty:
+            logger.warning(
+                "Optimization completed but produced no results. "
+                "This may indicate that all correlation calculations failed or "
+                "no valid combinations were found."
+            )
+        else:
+            logger.info(
+                f"Optimization completed: {len(result_df)} combinations evaluated. "
+                f"Results contain {len(result_df.columns)} columns: {list(result_df.columns)[:5]}..."
+            )
         
         return result_df
     
@@ -330,34 +340,45 @@ class CorrelationOptimizer:
         
         return correlation_matrices
     
-    def _evaluate_filtering(
+    def _evaluate_filtering_and_accuracy(
         self,
         daily_ranks: Dict[pd.Timestamp, pd.DataFrame],
         return_matrix: pd.DataFrame,
+        returns_data: pd.DataFrame,
         correlation_matrices: Dict[pd.Timestamp, pd.DataFrame],
         threshold: float,
         target_periods: List[int],
     ) -> Dict[int, Dict[str, float]]:
         """
-        Evaluate filtering performance for given threshold.
+        Evaluate filtering performance and correlation accuracy.
         
         Args:
             daily_ranks: Dictionary of daily rankings.
             return_matrix: Return matrix DataFrame.
+            returns_data: Returns DataFrame (must include future data).
             correlation_matrices: Dictionary of correlation matrices by date.
             threshold: Correlation threshold.
             target_periods: List of target holding periods.
         
         Returns:
-            Dictionary mapping period to metrics.
+            Dictionary mapping period to metrics (performance + accuracy).
         """
         metrics = {}
         
-        # Check if we have any correlation matrices
-        if not correlation_matrices:
-            logger.warning("No correlation matrices provided for evaluation")
+        if not correlation_matrices or return_matrix.empty:
             return metrics
         
+        # Get all relevant dates and symbols
+        daily_ranks_dates = set(daily_ranks.keys())
+        correlation_dates = set(correlation_matrices.keys())
+        return_matrix_dates = set(return_matrix.index.get_level_values(0))
+        return_matrix_symbols = set(return_matrix.index.get_level_values(1))
+        
+        overlap_dates = sorted(list(daily_ranks_dates & correlation_dates & return_matrix_dates))
+        
+        if not overlap_dates:
+            return metrics
+
         for period in target_periods:
             return_col = f'return_T+{period}'
             if return_col not in return_matrix.columns:
@@ -365,52 +386,50 @@ class CorrelationOptimizer:
             
             baseline_returns = []
             filtered_returns = []
+            accuracy_scores = []
+            
             filtered_count = 0
             total_count = 0
             
-            # Process each date
-            dates_with_data = 0
-            dates_without_data = 0
-            
-            for date in sorted(daily_ranks.keys()):
-                if date not in correlation_matrices:
-                    dates_without_data += 1
+            for date in overlap_dates:
+                # 1. Prediction/Filtering Logic
+                ranks_df = daily_ranks[date]
+                top_k_stocks = [s for s in ranks_df.head(self.top_k)['symbol'].tolist() if s in return_matrix_symbols]
+                
+                if not top_k_stocks:
                     continue
                 
-                dates_with_data += 1
-                
-                # Get baseline Top K stocks
-                ranks_df = daily_ranks[date]
-                top_k_stocks = ranks_df.head(self.top_k)['symbol'].tolist()
-                
-                # Get correlation matrix for this date
                 corr_matrix = correlation_matrices[date]
-                
-                # Filter stocks based on correlation threshold
-                # For symmetric correlations, use average correlation with other Top K stocks
                 filtered_stocks = []
                 
+                # Check accuracy for this date/period combination
+                # Accuracy is the correlation between Predicted Matrix and Realized Matrix
+                if len(top_k_stocks) >= 2:
+                    realized_accuracy = self._calculate_accuracy_for_date(
+                        date, period, top_k_stocks, corr_matrix, returns_data
+                    )
+                    if realized_accuracy is not None:
+                        accuracy_scores.append(realized_accuracy)
+
                 for symbol in top_k_stocks:
                     if symbol not in corr_matrix.index:
                         continue
                     
-                    # Calculate average correlation with other Top K stocks
                     other_stocks = [s for s in top_k_stocks if s != symbol and s in corr_matrix.columns]
                     if not other_stocks:
                         continue
                     
                     avg_corr = corr_matrix.loc[symbol, other_stocks].mean()
                     
-                    # Apply threshold filter
                     if not pd.isna(avg_corr) and avg_corr >= threshold:
                         filtered_stocks.append(symbol)
                 
-                # Collect returns
+                # 2. Performance Tracking
                 for symbol in top_k_stocks:
                     try:
                         if (date, symbol) not in return_matrix.index:
                             continue
-                        
+                            
                         return_value = return_matrix.loc[(date, symbol), return_col]
                         if pd.isna(return_value):
                             continue
@@ -421,45 +440,27 @@ class CorrelationOptimizer:
                         if symbol in filtered_stocks:
                             filtered_count += 1
                             filtered_returns.append(return_value)
-                    except (KeyError, IndexError) as e:
-                        logger.debug(f"Failed to get return for {symbol} on {date}: {e}")
+                    except:
                         continue
             
-            if dates_with_data == 0:
-                logger.warning(
-                    f"No dates with correlation matrices for period T+{period}, threshold={threshold}"
-                )
+            # 3. Calculate Final Metrics for Period
+            if not baseline_returns:
                 continue
             
-            logger.debug(
-                f"Period T+{period}, threshold={threshold}: "
-                f"dates_with_data={dates_with_data}, dates_without_data={dates_without_data}, "
-                f"total_symbols={total_count}, filtered_symbols={filtered_count}"
-            )
-            
-            # Calculate metrics
-            if len(baseline_returns) == 0:
-                logger.debug(
-                    f"No baseline returns for period T+{period}, threshold={threshold}"
-                )
-                continue
-            
+            # Baseline Stats
             baseline_win_rate = sum(1 for r in baseline_returns if r > 0) / len(baseline_returns)
             baseline_avg_return = np.mean(baseline_returns)
             
-            if len(filtered_returns) > 0:
+            # Filtered Stats
+            if filtered_returns:
                 filtered_win_rate = sum(1 for r in filtered_returns if r > 0) / len(filtered_returns)
                 filtered_avg_return = np.mean(filtered_returns)
                 win_rate_lift = filtered_win_rate - baseline_win_rate
                 
-                # Calculate profit/loss ratio
                 profits = [r for r in filtered_returns if r > 0]
                 losses = [r for r in filtered_returns if r < 0]
-                profit_loss_ratio = (
-                    np.mean(profits) / abs(np.mean(losses)) if losses else float('inf')
-                )
+                profit_loss_ratio = np.mean(profits) / abs(np.mean(losses)) if losses else float('inf')
                 
-                # Calculate max drawdown
                 cumulative = np.cumprod(1 + np.array(filtered_returns))
                 running_max = np.maximum.accumulate(cumulative)
                 drawdown = (cumulative - running_max) / running_max
@@ -471,6 +472,9 @@ class CorrelationOptimizer:
                 profit_loss_ratio = 0.0
                 max_drawdown = 0.0
             
+            # Accuracy Metric (Mean of Meta-Correlations)
+            mean_accuracy = np.mean(accuracy_scores) if accuracy_scores else 0.0
+            
             metrics[period] = {
                 'baseline_win_rate': baseline_win_rate,
                 'filtered_win_rate': filtered_win_rate,
@@ -479,23 +483,70 @@ class CorrelationOptimizer:
                 'filtered_avg_return': filtered_avg_return,
                 'profit_loss_ratio': profit_loss_ratio,
                 'max_drawdown': max_drawdown,
+                'accuracy': mean_accuracy,
                 'filtered_count': filtered_count,
                 'total_count': total_count,
             }
-            
-            logger.debug(
-                f"Period T+{period}, threshold={threshold}: "
-                f"baseline={len(baseline_returns)}, filtered={len(filtered_returns)}, "
-                f"win_rate_lift={win_rate_lift:.4f}"
-            )
-        
-        if not metrics:
-            logger.warning(
-                f"No metrics calculated for threshold={threshold}. "
-                f"Possible reasons: no matching return data in return_matrix"
-            )
         
         return metrics
+
+    def _calculate_accuracy_for_date(
+        self,
+        date: pd.Timestamp,
+        period: int,
+        symbols: List[str],
+        predicted_matrix: pd.DataFrame,
+        returns_data: pd.DataFrame,
+    ) -> Optional[float]:
+        """
+        Calculate Correlation Accuracy (Meta-Correlation) for a specific date and period.
+        
+        Accuracy = Correlation(vectorized(Predicted Matrix), vectorized(Realized Matrix))
+        """
+        try:
+            # 1. Get realized daily returns for the future window [T+1, T+period]
+            future_dates = returns_data.index[returns_data.index > date]
+            if len(future_dates) < period:
+                return None
+            
+            realized_window_dates = future_dates[:period]
+            realized_returns = returns_data.loc[realized_window_dates, symbols]
+            
+            if realized_returns.empty or realized_returns.isna().all().all():
+                return None
+            
+            # 2. Calculate Realized Correlation Matrix
+            # Use Pearson for realized ground truth
+            realized_matrix = realized_returns.corr(method='pearson')
+            
+            # 3. Compare Predicted vs Realized
+            # Ensure both have the same symbols in the same order
+            common_symbols = [s for s in symbols if s in realized_matrix.index and s in predicted_matrix.index]
+            if len(common_symbols) < 2:
+                return None
+            
+            pred = predicted_matrix.loc[common_symbols, common_symbols]
+            real = realized_matrix.loc[common_symbols, common_symbols]
+            
+            # Extract upper triangle (excluding diagonal)
+            pred_values = pred.values[np.triu_indices(len(common_symbols), k=1)]
+            real_values = real.values[np.triu_indices(len(common_symbols), k=1)]
+            
+            if len(pred_values) < 1:
+                return None
+                
+            # Filter NaNs
+            mask = ~np.isnan(pred_values) & ~np.isnan(real_values)
+            if mask.sum() < 2:
+                return None
+                
+            # Correlation of Correlations (Meta-Correlation)
+            accuracy = np.corrcoef(pred_values[mask], real_values[mask])[0, 1]
+            return float(accuracy) if not np.isnan(accuracy) else None
+            
+        except Exception as e:
+            logger.debug(f"Failed to calculate accuracy for {date} period {period}: {e}")
+            return None
     
     def _extract_periods_from_matrix(self, return_matrix: pd.DataFrame) -> List[int]:
         """

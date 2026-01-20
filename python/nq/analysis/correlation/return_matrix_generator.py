@@ -138,7 +138,8 @@ class ReturnMatrixGenerator:
                     forward_return = self._calculate_forward_return(
                         symbol, date, period, price_data
                     )
-                    row_data[f'return_T+{period}'] = forward_return
+                    # Store as NaN if None
+                    row_data[f'return_T+{period}'] = forward_return if forward_return is not None else float('nan')
                 
                 # Track ranking evolution
                 for period in self.holding_periods:
@@ -159,9 +160,16 @@ class ReturnMatrixGenerator:
         # Set MultiIndex
         result_df = result_df.set_index(['date', 'symbol'])
         
+        # Log date coverage
+        unique_dates = set(result_df.index.get_level_values(0))
         logger.info(
             f"Generated return matrix: {len(result_df)} rows, "
-            f"{len(result_df.columns)} columns"
+            f"{len(result_df.columns)} columns, "
+            f"{len(unique_dates)} unique dates"
+        )
+        logger.debug(
+            f"Return matrix date range: {min(unique_dates)} to {max(unique_dates)}, "
+            f"Sample dates: {list(sorted(unique_dates))[:5]}"
         )
         
         return result_df
@@ -201,18 +209,49 @@ class ReturnMatrixGenerator:
         
         try:
             # Load close prices
-            price_data = D.features(
+            raw_price_data = D.features(
                 instruments=instruments,
                 fields=["$close"],
                 start_time=start_date.strftime("%Y-%m-%d"),
                 end_time=end_date_buffer.strftime("%Y-%m-%d"),
             )
             
-            if price_data.empty:
+            if raw_price_data.empty:
                 logger.warning("No price data loaded from Qlib")
                 return pd.DataFrame()
             
+            # CRITICAL: Normalize Qlib's inconsistent format to unified format
+            # Unified format: Index=MultiIndex(instrument, datetime), Columns=single-level fields
+            from nq.trading.utils.data_normalizer import normalize_qlib_features_result
+            
+            price_data = normalize_qlib_features_result(raw_price_data, instruments=instruments)
+            
+            if price_data.empty:
+                logger.warning("Normalized price data is empty")
+                return pd.DataFrame()
+            
             logger.info(f"Loaded price data: {len(price_data)} rows")
+            
+            # Debug: Check data structure and date range
+            # Note: normalize_qlib_features_result returns MultiIndex (instrument, datetime)
+            if isinstance(price_data.index, pd.MultiIndex):
+                # After normalization, index should be (instrument, datetime)
+                symbol_level = price_data.index.get_level_values(0)
+                date_level = price_data.index.get_level_values(1)
+                
+                logger.info(
+                    f"Price data structure: MultiIndex {price_data.index.names} "
+                    f"with {len(date_level.unique())} unique dates "
+                    f"({date_level.min() if not date_level.empty else 'N/A'} to {date_level.max() if not date_level.empty else 'N/A'}), "
+                    f"{len(symbol_level.unique())} unique symbols"
+                )
+            else:
+                logger.warning(
+                    f"Price data structure: Simple index (unexpected). "
+                    f"Dates: {len(price_data.index)} ({price_data.index.min()} to {price_data.index.max()}), "
+                    f"Columns: {len(price_data.columns)}"
+                )
+            
             return price_data
             
         except Exception as e:
@@ -241,9 +280,16 @@ class ReturnMatrixGenerator:
         try:
             # Get entry price
             if isinstance(price_data.index, pd.MultiIndex):
-                entry_prices = price_data.loc[(symbol, entry_date), :]
+                try:
+                    # Normalized format is (instrument, datetime)
+                    entry_prices = price_data.loc[(symbol, entry_date), :]
+                except (KeyError, IndexError) as e:
+                    return None
             else:
-                entry_prices = price_data.loc[entry_date, symbol]
+                try:
+                    entry_prices = price_data.loc[entry_date, symbol]
+                except (KeyError, IndexError):
+                    return None
             
             if isinstance(entry_prices, pd.Series):
                 entry_price = entry_prices.get('$close', None)
@@ -251,6 +297,7 @@ class ReturnMatrixGenerator:
                 entry_price = entry_prices
             
             if entry_price is None or pd.isna(entry_price) or entry_price <= 0:
+                logger.debug(f"Invalid entry price for {symbol} on {entry_date}: {entry_price}")
                 return None
             
             # Get future date (need to account for trading days)
@@ -259,20 +306,52 @@ class ReturnMatrixGenerator:
             
             # Find actual trading day at or after target
             if isinstance(price_data.index, pd.MultiIndex):
-                symbol_data = price_data.loc[symbol, :]
+                try:
+                    symbol_data = price_data.loc[symbol, :]
+                except (KeyError, IndexError):
+                    logger.debug(f"Symbol {symbol} not found in price_data")
+                    return None
+                    
                 if symbol_data.empty:
+                    logger.debug(f"No data for symbol {symbol}")
                     return None
                 
                 # Get dates for this symbol
-                dates = symbol_data.index.get_level_values(0) if isinstance(symbol_data.index, pd.MultiIndex) else symbol_data.index
-                future_dates = dates[dates >= entry_date]
+                # After loc[symbol, :], symbol_data.index should be datetime (single level)
+                # But check if it's still MultiIndex (shouldn't happen, but be safe)
+                if isinstance(symbol_data.index, pd.MultiIndex):
+                    # If still MultiIndex, get datetime level (should be level 1 if original was (instrument, datetime))
+                    dates = symbol_data.index.get_level_values(-1)  # Last level should be datetime
+                else:
+                    dates = symbol_data.index
                 
-                if len(future_dates) < holding_period + 1:
+                # Get dates after entry_date (exclude entry_date itself)
+                future_dates = dates[dates > entry_date]
+                
+                if len(future_dates) < holding_period:
+                    logger.debug(
+                        f"Insufficient future dates for {symbol} on {entry_date}: "
+                        f"need {holding_period} trading days after entry_date, have {len(future_dates)}"
+                    )
                     return None
                 
-                # Get price at target period
-                target_date = future_dates.iloc[holding_period] if len(future_dates) > holding_period else future_dates.iloc[-1]
-                future_prices = price_data.loc[(symbol, target_date), :]
+                # Get price at target period (holding_period trading days after entry_date)
+                # future_dates is already sorted and contains only dates > entry_date
+                # Use iloc if available, otherwise use positional indexing
+                if hasattr(future_dates, 'iloc'):
+                    target_date = future_dates.iloc[holding_period - 1]
+                else:
+                    # For DatetimeIndex or similar, use positional indexing
+                    target_date = future_dates[holding_period - 1]
+                
+                try:
+                    future_prices = price_data.loc[(symbol, target_date), :]
+                except (KeyError, IndexError) as e:
+                    logger.debug(
+                        f"Future price not found for ({symbol}, {target_date}). "
+                        f"Error: {e}. Available dates for symbol: {list(dates[dates > entry_date])[:5]}"
+                    )
+                    return None
                 
                 if isinstance(future_prices, pd.Series):
                     future_price = future_prices.get('$close', None)
@@ -281,13 +360,28 @@ class ReturnMatrixGenerator:
             else:
                 # Simple index case
                 dates = price_data.index
-                future_dates = dates[dates >= entry_date]
+                # Get dates after entry_date (exclude entry_date itself)
+                future_dates = dates[dates > entry_date]
                 
-                if len(future_dates) < holding_period + 1:
+                if len(future_dates) < holding_period:
+                    logger.debug(
+                        f"Insufficient future dates for {symbol} on {entry_date} (simple index): "
+                        f"need {holding_period} trading days after entry_date, have {len(future_dates)}"
+                    )
                     return None
                 
-                target_date = future_dates.iloc[holding_period] if len(future_dates) > holding_period else future_dates.iloc[-1]
-                future_price = price_data.loc[target_date, symbol]
+                # Get price at target period (holding_period trading days after entry_date)
+                # Use iloc if available, otherwise use positional indexing
+                if hasattr(future_dates, 'iloc'):
+                    target_date = future_dates.iloc[holding_period - 1]
+                else:
+                    target_date = future_dates[holding_period - 1]
+                
+                try:
+                    future_price = price_data.loc[target_date, symbol]
+                except (KeyError, IndexError):
+                    logger.debug(f"Future price not found for {symbol} on {target_date} (simple index)")
+                    return None
             
             if future_price is None or pd.isna(future_price) or future_price <= 0:
                 return None
