@@ -150,6 +150,7 @@ def load_returns_data(
         start_date: pd.Timestamp,
         end_date: pd.Timestamp,
         lookback_days: int = 120,
+        future_days: int = 60,
 ) -> pd.DataFrame:
     """
     Load returns data for correlation calculation.
@@ -158,8 +159,8 @@ def load_returns_data(
         instruments: List of stock symbols.
         start_date: Start date for testing.
         end_date: End date for testing.
-        lookback_days: Number of days to look back before start_date for historical data
-                      (default: 120 days to ensure enough data for correlation calculation).
+        lookback_days: Number of days to look back before start_date for historical data.
+        future_days: Number of days to look forward after end_date for realized correlation calculation.
 
     Returns:
         DataFrame with returns (columns: symbols, index: dates).
@@ -168,21 +169,22 @@ def load_returns_data(
     from nq.trading.utils.data_normalizer import normalize_qlib_features_result
 
     # Calculate actual start date with lookback window
-    # Need historical data before start_date for correlation calculation
-    data_start_date = start_date - pd.Timedelta(days=lookback_days * 2)  # Buffer for trading days
+    data_start_date = start_date - pd.Timedelta(days=lookback_days * 2)
+    # Add buffer for realized correlation
+    data_end_date = end_date + pd.Timedelta(days=future_days * 2)
 
     logger.info(
         f"Loading returns data: {len(instruments)} instruments, "
-        f"{data_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} "
-        f"(lookback: {lookback_days} days)"
+        f"{data_start_date.strftime('%Y-%m-%d')} to {data_end_date.strftime('%Y-%m-%d')} "
+        f"(lookback: {lookback_days}d, future: {future_days}d)"
     )
 
-    # Load close prices (with lookback window)
+    # Load close prices
     price_data = D.features(
         instruments=instruments,
         fields=["$close"],
         start_time=data_start_date.strftime("%Y-%m-%d"),
-        end_time=end_date.strftime("%Y-%m-%d"),
+        end_time=data_end_date.strftime("%Y-%m-%d"),
     )
 
     if price_data.empty:
@@ -260,6 +262,7 @@ def load_highs_lows_data(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     lookback_days: int = 120,
+    future_days: int = 60,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Load highs and lows data for VolatilitySync correlation calculation.
@@ -269,6 +272,7 @@ def load_highs_lows_data(
         start_date: Start date for testing.
         end_date: End date for testing.
         lookback_days: Number of days to look back before start_date for historical data.
+        future_days: Number of days to look forward for realized correlation.
     
     Returns:
         Tuple of (highs_df, lows_df) DataFrames.
@@ -277,11 +281,12 @@ def load_highs_lows_data(
     from nq.trading.utils.data_normalizer import normalize_qlib_features_result
     
     # Calculate actual start date with lookback window
-    data_start_date = start_date - pd.Timedelta(days=lookback_days * 2)  # Buffer for trading days
+    data_start_date = start_date - pd.Timedelta(days=lookback_days * 2)
+    data_end_date = end_date + pd.Timedelta(days=future_days * 2)
     
     logger.info(
         f"Loading highs/lows data: {len(instruments)} instruments, "
-        f"{data_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        f"{data_start_date.strftime('%Y-%m-%d')} to {data_end_date.strftime('%Y-%m-%d')}"
     )
     
     # Load high and low prices
@@ -289,7 +294,7 @@ def load_highs_lows_data(
         instruments=instruments,
         fields=["$high", "$low"],
         start_time=data_start_date.strftime("%Y-%m-%d"),
-        end_time=end_date.strftime("%Y-%m-%d"),
+        end_time=data_end_date.strftime("%Y-%m-%d"),
     )
     
     if price_data.empty:
@@ -396,7 +401,13 @@ def main():
         "--instruments",
         type=str,
         nargs="+",
-        help="List of stock symbols (if not provided, uses all from Qlib)",
+        help="List of stock symbols (if not provided, uses CSI500 from Qlib)",
+    )
+    parser.add_argument(
+        "--use-all-stocks",
+        action="store_true",
+        default=False,
+        help="Use all stocks from Qlib instead of CSI500 (default: False, uses CSI500)",
     )
     parser.add_argument(
         "--qlib-dir",
@@ -439,60 +450,120 @@ def main():
     if args.instruments:
         instruments = args.instruments
     else:
-        # Use all instruments from Qlib as default
+        # Use CSI500 or all instruments from Qlib
         from qlib.data import D
 
-        # Get instruments filter
-        instruments_filter = D.instruments(market="all")
-
-        # Convert filter to list using D.list_instruments
-        try:
-            instruments = D.list_instruments(
-                instruments=instruments_filter,
-                as_list=True,
-                freq="day"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to use D.list_instruments: {e}, trying direct conversion")
-            # Fallback: try direct conversion
-            if hasattr(instruments_filter, "__iter__"):
-                try:
-                    instruments = list(instruments_filter)
-                except Exception as e2:
-                    logger.error(f"Failed to convert instruments to list: {e2}")
-                    # Last resort: read from file
-                    logger.info("Trying to read instruments from file...")
-                    qlib_dir_path = Path(qlib_dir)
-                    instruments_file = qlib_dir_path / 'instruments' / 'all.txt'
-                    if instruments_file.exists():
-                        instruments = []
-                        with open(instruments_file, 'r') as f:
-                            for line in f:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                parts = line.split('\t')
-                                if len(parts) >= 1:
-                                    stock_code = parts[0].strip()
-                                    if stock_code:
-                                        instruments.append(stock_code)
-                        logger.info(f"Loaded {len(instruments)} instruments from file")
-                    else:
-                        logger.error(f"Instruments file not found: {instruments_file}")
-                        instruments = []
+        if not args.use_all_stocks:  # Default: use CSI500
+            # Try to get CSI500 stocks
+            logger.info("Loading CSI500 stock list...")
+            
+            instruments = []
+            
+            # Method 1: Try to read from outputs directory (project root)
+            project_root = Path(__file__).parent.parent.parent
+            csi500_file_outputs = project_root / 'outputs' / 'csi500.txt'
+            
+            # Method 2: Try to read from Qlib instruments directory
+            qlib_dir_path = Path(qlib_dir)
+            csi500_file_qlib = qlib_dir_path / 'instruments' / 'csi500.txt'
+            
+            # Try outputs directory first
+            csi500_file = None
+            if csi500_file_outputs.exists():
+                csi500_file = csi500_file_outputs
+            elif csi500_file_qlib.exists():
+                csi500_file = csi500_file_qlib
+            
+            if csi500_file:
+                with open(csi500_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        # Handle both tab-separated and line-separated formats
+                        parts = line.split('\t')
+                        stock_code = parts[0].strip() if parts else line.strip()
+                        if stock_code:
+                            instruments.append(stock_code)
+                logger.info(f"Loaded {len(instruments)} CSI500 instruments from file: {csi500_file}")
             else:
-                instruments = []
+                # Method 2: Try to use Qlib's CSI500 filter
+                logger.info(f"CSI500 file not found at {csi500_file}, trying Qlib API...")
+                try:
+                    # Try CSI500 market filter
+                    instruments_filter = D.instruments(market="csi500")
+                    instruments = D.list_instruments(
+                        instruments=instruments_filter,
+                        as_list=True,
+                        freq="day"
+                    )
+                    logger.info(f"Loaded {len(instruments)} CSI500 instruments from Qlib")
+                except Exception as e:
+                    logger.warning(f"Failed to get CSI500 from Qlib: {e}")
+                    # Fallback: try to get from all and filter (if Qlib supports it)
+                    logger.info("Falling back to all instruments...")
+                    instruments_filter = D.instruments(market="all")
+                    try:
+                        instruments = D.list_instruments(
+                            instruments=instruments_filter,
+                            as_list=True,
+                            freq="day"
+                        )
+                        logger.warning(
+                            f"Using all instruments ({len(instruments)} stocks) instead of CSI500. "
+                            f"Consider creating {csi500_file} file or ensuring Qlib has CSI500 data."
+                        )
+                    except Exception as e2:
+                        logger.error(f"Failed to load instruments: {e2}")
+                        instruments = []
+        else:
+            # Use all instruments from Qlib
+            logger.info("Loading all instruments from Qlib...")
+            instruments_filter = D.instruments(market="all")
+            
+            # Convert filter to list using D.list_instruments
+            try:
+                instruments = D.list_instruments(
+                    instruments=instruments_filter,
+                    as_list=True,
+                    freq="day"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to use D.list_instruments: {e}, trying direct conversion")
+                # Fallback: try direct conversion
+                if hasattr(instruments_filter, "__iter__"):
+                    try:
+                        instruments = list(instruments_filter)
+                    except Exception as e2:
+                        logger.error(f"Failed to convert instruments to list: {e2}")
+                        # Last resort: read from file
+                        logger.info("Trying to read instruments from file...")
+                        qlib_dir_path = Path(qlib_dir)
+                        instruments_file = qlib_dir_path / 'instruments' / 'all.txt'
+                        if instruments_file.exists():
+                            instruments = []
+                            with open(instruments_file, 'r') as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    parts = line.split('\t')
+                                    if len(parts) >= 1:
+                                        stock_code = parts[0].strip()
+                                        if stock_code:
+                                            instruments.append(stock_code)
+                            logger.info(f"Loaded {len(instruments)} instruments from file")
+                        else:
+                            logger.error(f"Instruments file not found: {instruments_file}")
+                            instruments = []
+                else:
+                    instruments = []
 
         if not instruments:
             logger.error("No instruments found. Please check Qlib data.")
             return
 
         logger.info(f"Loaded {len(instruments)} instruments from Qlib")
-
-        # Limit to first 100 stocks for faster testing (can be removed)
-        if len(instruments) > 100:
-            logger.info(f"Limiting to first 100 instruments for faster testing")
-            instruments = instruments[:100]
 
     logger.info(f"Using {len(instruments)} instruments: {instruments[:5]}..." if len(
         instruments) > 5 else f"Using {len(instruments)} instruments: {instruments}")
@@ -571,16 +642,17 @@ def main():
     logger.info("Stage 2: Optimizing correlation algorithms")
     logger.info("=" * 80)
 
-    logger.info("Loading returns data...")
-    returns_data = load_returns_data(instruments, start_date, end_date)
+    logger.info("Loading returns data (with look-forward buffer)...")
+    max_h_period = max(return_matrix_gen.holding_periods)
+    returns_data = load_returns_data(instruments, start_date, end_date, future_days=max_h_period)
     
     if returns_data.empty:
         logger.error("Failed to load returns data. Exiting.")
         return
     
     # Load highs/lows data for VolatilitySync
-    logger.info("Loading highs/lows data for VolatilitySync...")
-    highs_data, lows_data = load_highs_lows_data(instruments, start_date, end_date)
+    logger.info("Loading highs/lows data (with look-forward buffer)...")
+    highs_data, lows_data = load_highs_lows_data(instruments, start_date, end_date, future_days=max_h_period)
     
     if highs_data.empty or lows_data.empty:
         logger.warning("Failed to load highs/lows data. VolatilitySync will be skipped.")
@@ -611,7 +683,9 @@ def main():
     # Save optimization results
     optimization_path = output_dir / "optimization_results.csv"
     optimization_results.to_csv(optimization_path, index=False)
-    logger.info(f"Saved optimization results to {optimization_path}")
+    logger.info(f"✅ Saved optimization results to: {optimization_path}")
+    logger.info(f"   Results shape: {optimization_results.shape} (rows x columns)")
+    logger.info(f"   Columns: {list(optimization_results.columns)}")
 
     # Stage 3: Generate sensitivity analysis
     logger.info("=" * 80)
@@ -628,11 +702,12 @@ def main():
     optimal_matrix.to_csv(optimal_path, index=False)
     logger.info(f"Saved optimal combinations to {optimal_path}")
 
-    # Print summary
+    # Print summary with Accuracy
     print("\n" + "=" * 80)
-    print("OPTIMAL COMBINATIONS SUMMARY")
+    print("OPTIMAL COMBINATIONS & ACCURACY SUMMARY")
     print("=" * 80)
-    print(optimal_matrix.to_string(index=False))
+    cols_to_show = ['target_period', 'algorithm', 'window', 'threshold', 'accuracy', 'win_rate_lift']
+    print(optimal_matrix[cols_to_show].to_string(index=False))
 
     # Generate plots
     logger.info("Generating ranking drift plot...")
@@ -652,8 +727,13 @@ def main():
     )
 
     logger.info("=" * 80)
-    logger.info("Analysis completed successfully!")
-    logger.info(f"Results saved to: {output_dir}")
+    logger.info("✅ Analysis completed successfully!")
+    logger.info("")
+    logger.info("📁 Results saved to:")
+    logger.info(f"   - Return matrix: {output_dir / 'return_matrix.csv'}")
+    logger.info(f"   - Optimization results: {output_dir / 'optimization_results.csv'}")
+    logger.info(f"   - Optimal combinations: {output_dir / 'optimal_combinations.csv'}")
+    logger.info("")
     logger.info("=" * 80)
 
 

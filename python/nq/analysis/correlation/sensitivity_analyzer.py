@@ -95,6 +95,7 @@ class SensitivityAnalyzer:
                 'baseline_win_rate': best_row.get('baseline_win_rate', 0.0),
                 'filtered_win_rate': best_row.get('filtered_win_rate', 0.0),
                 'win_rate_lift': best_row.get('win_rate_lift', 0.0),
+                'accuracy': best_row.get('accuracy', 0.0),
             })
         
         result_df = pd.DataFrame(optimal_combinations)
@@ -289,6 +290,63 @@ class SensitivityAnalyzer:
         logger.info(f"Correlation threshold heatmap saved to {output_path}")
         plt.close()
     
+    def plot_accuracy_decay(
+        self,
+        optimization_results: pd.DataFrame,
+        output_path: Optional[str] = None,
+    ) -> None:
+        """
+        Plot accuracy decay showing how correlation predictive power drops over time.
+        """
+        if not HAS_PLOTTING or optimization_results.empty or 'accuracy' not in optimization_results.columns:
+            return
+            
+        plt.figure(figsize=(12, 6))
+        
+        # Average accuracy across all window/threshold combinations for each algorithm
+        for algo in optimization_results['algorithm'].unique():
+            algo_data = optimization_results[optimization_results['algorithm'] == algo]
+            avg_accuracy = algo_data.groupby('target_period')['accuracy'].mean()
+            plt.plot(avg_accuracy.index, avg_accuracy.values, marker='s', label=algo)
+            
+        plt.title('Correlation Accuracy Decay (Meta-Correlation vs Future Period)')
+        plt.xlabel('Future Period (Trading Days)')
+        plt.ylabel('Mean Meta-Correlation (Accuracy)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        if output_path is None:
+            output_path = f"{self.output_dir}/accuracy_decay.png"
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+
+    def compare_algorithm_accuracy(
+        self,
+        optimization_results: pd.DataFrame,
+        output_path: Optional[str] = None,
+    ) -> None:
+        """
+        Compare mean accuracy (overall) across different algorithms.
+        """
+        if not HAS_PLOTTING or optimization_results.empty or 'accuracy' not in optimization_results.columns:
+            return
+            
+        plt.figure(figsize=(10, 6))
+        
+        avg_accuracy = optimization_results.groupby('algorithm')['accuracy'].mean().sort_values(ascending=False)
+        sns.barplot(x=avg_accuracy.index, y=avg_accuracy.values, palette='viridis')
+        
+        plt.title('Algorithm Comparison: Mean Correlation Accuracy')
+        plt.ylabel('Mean Meta-Correlation')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        if output_path is None:
+            output_path = f"{self.output_dir}/algorithm_accuracy_comparison.png"
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+
     def generate_summary_report(
         self,
         optimization_results: pd.DataFrame,
@@ -317,25 +375,18 @@ class SensitivityAnalyzer:
         summary_stats = {
             'total_combinations': len(optimization_results),
             'algorithms_tested': optimization_results['algorithm'].nunique(),
-            'windows_tested': optimization_results['window'].nunique(),
-            'thresholds_tested': optimization_results['threshold'].nunique(),
             'periods_tested': optimization_results['target_period'].nunique(),
             'best_win_rate_lift': optimization_results['win_rate_lift'].max(),
-            'avg_win_rate_lift': optimization_results['win_rate_lift'].mean(),
-            'best_algorithm': optimization_results.loc[
-                optimization_results['win_rate_lift'].idxmax(), 'algorithm'
-            ],
+            'best_accuracy': optimization_results['accuracy'].max() if 'accuracy' in optimization_results else 0.0,
+            'avg_accuracy': optimization_results['accuracy'].mean() if 'accuracy' in optimization_results else 0.0,
+            'best_precision_algo': optimization_results.loc[
+                optimization_results['accuracy'].idxmax(), 'algorithm'
+            ] if 'accuracy' in optimization_results else 'N/A',
         }
         
-        # Combine results
-        report = {
-            'optimal_combinations': optimal_matrix,
-            'summary_statistics': pd.Series(summary_stats),
-        }
-        
-        # Save to CSV if path provided
-        if output_path is None:
-            output_path = f"{self.output_dir}/correlation_optimization_report.csv"
+        # Save plots
+        self.plot_accuracy_decay(optimization_results)
+        self.compare_algorithm_accuracy(optimization_results)
         
         # Save optimal combinations
         optimal_matrix.to_csv(output_path, index=False)
