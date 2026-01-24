@@ -1,0 +1,29 @@
+# Teapot Pattern Recognition Configuration
+
+# Data loading
+data:
+  use_cache: false  # Use Parquet cache (false for production, true for development)
+  strict_cache: false  # Strict cache mode (true for backtesting)
+  cache_dir: "storage/teapot_cache"
+
+# Feature computation
+features:
+  box_window: 40  # Window size for box calculation (days)
+
+# State machine parameters
+state_machine:
+  box_window: 40
+  box_volatility_threshold: 0.15  # Maximum box width (15%)
+  box_r2_threshold: 0.7  # Minimum R² for box quality
+  trap_max_depth: 0.20  # Maximum trap depth (20% of box height)
+  trap_max_days: 5  # Maximum days for trap state
+  reverse_max_days: 10  # Maximum days for reverse state
+  reverse_recover_ratio: 0.8  # Minimum recovery ratio (80%)
+  breakout_vol_ratio: 1.5  # Minimum volume ratio for breakout (1.5x)
+
+# Filters
+filters:
+  min_turnover: 0.01  # Minimum turnover rate (1%)
+  min_amount: 10000000.0  # Minimum trading amount (10M CNY)
+  max_gap: 0.10  # Maximum gap ratio (10%)
+  max_trap_depth: 0.20  # Maximum trap depth (20%)
