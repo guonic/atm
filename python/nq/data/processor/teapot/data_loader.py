@@ -15,6 +15,7 @@ from nq.config import DatabaseConfig
 from nq.data.processor.teapot.cache_manager import CacheManager
 from nq.data.processor.teapot.exceptions import CacheIncompleteError, CacheNotFoundError
 from nq.repo.kline_repo import StockKlineDayRepo
+from nq.repo.stock_repo import StockBasicRepo
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class TeapotDataLoader:
             self.cache_manager = None
 
         self.kline_repo = StockKlineDayRepo(db_config, schema)
+        self.stock_basic_repo = StockBasicRepo(db_config, schema)
 
     def load_daily_data(
         self,
@@ -164,13 +166,107 @@ class TeapotDataLoader:
                     )
         else:
             # Load all stocks (need to query all stocks first)
-            # For now, we'll need to get stock list from stock_basic table
-            # This is a simplified version - in production, you might want to optimize this
             logger.warning(
                 "Loading all stocks - this may be slow. Consider specifying symbols."
             )
-            # TODO: Implement efficient batch loading for all stocks
-            all_data = []
+            
+            # Get all stock codes from stock_basic table
+            try:
+                all_stocks = self.stock_basic_repo.get_all()
+                stock_codes = [stock.ts_code for stock in all_stocks if stock.ts_code]
+                logger.info(f"Found {len(stock_codes)} stocks in stock_basic table")
+                
+                if not stock_codes:
+                    logger.warning("No stocks found in stock_basic table")
+                    return pl.DataFrame()
+                
+                # Load data for all stocks using direct SQL query (more efficient)
+                try:
+                    from sqlalchemy import text
+                    engine = self.kline_repo._get_engine()
+                    table_name = self.kline_repo._get_full_table_name()
+                    
+                    # Build SQL query
+                    query = f"""
+                    SELECT ts_code, trade_date, open, high, low, close, volume, amount
+                    FROM {table_name}
+                    WHERE trade_date >= :start_date AND trade_date <= :end_date
+                    ORDER BY ts_code, trade_date
+                    """
+                    
+                    logger.info("Executing SQL query for all stocks...")
+                    with engine.connect() as conn:
+                        result = conn.execute(
+                            text(query),
+                            {
+                                "start_date": start_dt.date(),
+                                "end_date": end_dt.date(),
+                            },
+                        )
+                        
+                        for row in result:
+                            all_data.append(
+                                {
+                                    "ts_code": row.ts_code,
+                                    "trade_date": (
+                                        row.trade_date.strftime("%Y-%m-%d")
+                                        if isinstance(row.trade_date, datetime)
+                                        else str(row.trade_date)
+                                    ),
+                                    "open": float(row.open) if row.open else None,
+                                    "high": float(row.high) if row.high else None,
+                                    "low": float(row.low) if row.low else None,
+                                    "close": float(row.close) if row.close else None,
+                                    "volume": int(row.volume) if row.volume else 0,
+                                    "amount": float(row.amount) if row.amount else None,
+                                }
+                            )
+                    
+                    logger.info(f"Loaded {len(all_data)} records from SQL query")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load data using SQL query, falling back to batch processing: {e}"
+                    )
+                    # Fallback to batch processing
+                    batch_size = 100
+                    for i in range(0, len(stock_codes), batch_size):
+                        batch_codes = stock_codes[i : i + batch_size]
+                        logger.info(
+                            f"Loading batch {i // batch_size + 1}/{(len(stock_codes) + batch_size - 1) // batch_size}: "
+                            f"{len(batch_codes)} stocks"
+                        )
+                        
+                        for ts_code in batch_codes:
+                            try:
+                                klines = self.kline_repo.get_by_ts_code(
+                                    ts_code=ts_code,
+                                    start_time=start_dt,
+                                    end_time=end_dt,
+                                )
+                                for kline in klines:
+                                    all_data.append(
+                                        {
+                                            "ts_code": kline.ts_code,
+                                            "trade_date": kline.trade_date.strftime("%Y-%m-%d")
+                                            if isinstance(kline.trade_date, datetime)
+                                            else str(kline.trade_date),
+                                            "open": float(kline.open) if kline.open else None,
+                                            "high": float(kline.high) if kline.high else None,
+                                            "low": float(kline.low) if kline.low else None,
+                                            "close": float(kline.close) if kline.close else None,
+                                            "volume": int(kline.volume) if kline.volume else 0,
+                                            "amount": float(kline.amount) if kline.amount else None,
+                                        }
+                                    )
+                            except Exception as e2:
+                                logger.warning(
+                                    f"Failed to load data for {ts_code}: {e2}"
+                                )
+                                continue
+                            
+            except Exception as e:
+                logger.error(f"Failed to load stock list: {e}")
+                return pl.DataFrame()
 
         if not all_data:
             logger.warning("No data found in PostgreSQL")
