@@ -15,9 +15,6 @@ from typing import List, Optional
 
 import polars as pl
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-
 from nq.config import DatabaseConfig, load_config
 from nq.repo.kline_repo import StockKlineDayRepo
 from nq.repo.stock_repo import StockBasicRepo

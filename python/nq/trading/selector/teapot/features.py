@@ -5,10 +5,15 @@ Computes box features, regression R², and volume ratios.
 """
 
 import logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import polars as pl
+
+from nq.trading.selector.teapot.box_detector import (
+    BoxDetector,
+    SimpleBoxDetector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,55 +25,42 @@ class TeapotFeatures:
     Computes box statistics, regression R², and volume ratios.
     """
 
-    def __init__(self, box_window: int = 40):
+    def __init__(
+        self,
+        box_window: int = 40,
+        box_detector: Optional[BoxDetector] = None,
+    ):
         """
         Initialize feature calculator.
 
         Args:
             box_window: Window size for box calculation (default: 40 days).
+            box_detector: Optional box detector instance. If None, uses SimpleBoxDetector.
         """
         self.box_window = box_window
+        self.box_detector = box_detector or SimpleBoxDetector(box_window=box_window)
 
     def compute_box_features(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        Compute box features.
+        Compute box features using configured box detector.
 
         Args:
             df: Input DataFrame with columns: ts_code, trade_date, close, high, low.
 
         Returns:
             DataFrame with added columns:
-            - box_h: Box upper bound (rolling max)
-            - box_l: Box lower bound (rolling min)
+            - box_h: Box upper bound
+            - box_l: Box lower bound
             - box_width: Box width (relative value)
-            - box_volatility: Box volatility
+            - is_box_candidate: Boolean indicating if current row is a box candidate
+            - box_volatility: Box volatility (std of returns)
         """
-        # Group by stock code
-        df = df.with_columns(
-            [
-                # Box upper bound (rolling max of high)
-                pl.col("high")
-                .rolling_max(window_size=self.box_window)
-                .shift(1)
-                .over("ts_code")
-                .alias("box_h"),
-                # Box lower bound (rolling min of low)
-                pl.col("low")
-                .rolling_min(window_size=self.box_window)
-                .shift(1)
-                .over("ts_code")
-                .alias("box_l"),
-            ]
-        )
+        # Use box detector to compute box features
+        df = self.box_detector.detect_box(df)
 
-        # Compute box width and volatility
+        # Add box volatility (std of returns within box)
         df = df.with_columns(
             [
-                # Box width (relative)
-                ((pl.col("box_h") - pl.col("box_l")) / pl.col("box_l")).alias(
-                    "box_width"
-                ),
-                # Box volatility (std of returns within box)
                 pl.col("close")
                 .pct_change()
                 .rolling_std(window_size=self.box_window)
